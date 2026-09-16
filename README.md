@@ -11,7 +11,7 @@ Open two terminals from the project folder.
 ```powershell
 cd backend
 Copy-Item .env.example .env
-# Put your Gemini key in backend/.env (do not paste it into frontend files)
+# Put your Gemini key in backend/.env (do not paste it into frontend files , if you need the key check it on .env back end DUDU BOYS HEHE)
 .\venv\Scripts\Activate.ps1
 uvicorn main:app --reload --port 8000
 ```
