@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useState } from 'react';
 import './App.css';
 import Hero from './components/Hero';
 import FieldDashboard from './components/FieldDashboard';
@@ -8,6 +8,8 @@ import Footer from './components/Footer';
 import FieldMap from './components/FieldMap';
 import CropRecommendations from './components/CropRecommendations';
 import WateringReminders from './components/WateringReminders';
+import AuthModal from './components/AuthModal';
+import Icon from './components/Icon';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
 
@@ -21,6 +23,11 @@ const defaultWeather = {
 };
 
 export default function App() {
+  const [authToken, setAuthToken] = useState('');
+  const [userPlants, setUserPlants] = useState([]);
+  const [plantLoading, setPlantLoading] = useState(false);
+  const [plantError, setPlantError] = useState('');
+
   const [weather, setWeather] = useState(defaultWeather);
   const [fieldProfile, setFieldProfile] = useState(null);
   const [locationStatus, setLocationStatus] = useState('');
@@ -37,13 +44,34 @@ export default function App() {
   const [chatLoading, setChatLoading] = useState(false);
   const [chatError, setChatError] = useState('');
 
-  const requestJson = async (path, options) => {
+  const requestJson = async (path, options = {}) => {
+    const headers = { 'Content-Type': 'application/json', ...options.headers };
+    if (authToken) {
+      headers['Authorization'] = `Bearer ${authToken}`;
+    }
+
     const response = await fetch(`${API_BASE_URL}${path}`, {
-      headers: { 'Content-Type': 'application/json' }, ...options,
+      ...options,
+      headers,
     });
+    
     const body = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(body.detail || 'The service could not complete that request. Please try again.');
     return body;
+  };
+
+  const fetchUserPlants = async () => {
+    if (!authToken) return;
+    setPlantLoading(true);
+    setPlantError('');
+    try {
+      const data = await requestJson('/api/plants', { method: 'GET' });
+      setUserPlants(data);
+    } catch (error) {
+      setPlantError(error.message);
+    } finally {
+      setPlantLoading(false);
+    }
   };
 
   const loadFieldProfile = async (latitude, longitude) => {
@@ -137,9 +165,34 @@ export default function App() {
     } finally { setChatLoading(false); }
   };
 
+  // If the user hasn't logged in yet, show ONLY the login/signup screen
+  if (!authToken) {
+    return (
+      <main className="auth-page">
+        <div className="auth-brand-mark" aria-hidden="true"><Icon name="leaf" size={23} /></div>
+        <AuthModal onAuthenticated={(token) => {
+          setAuthToken(token);
+          fetchUserPlants();
+        }} />
+      </main>
+    );
+  }
+
+  // Once authenticated, show the entire main dashboard
   return (
     <main>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '1rem 2rem', backgroundColor: '#1a3a2a', color: '#fff' }}>
+        <span>Welcome back!</span>
+        <button 
+          onClick={() => setAuthToken('')} 
+          style={{ background: 'transparent', border: '1px solid #fff', color: '#fff', padding: '0.4rem 0.8rem', borderRadius: '4px', cursor: 'pointer' }}
+        >
+          Sign Out
+        </button>
+      </div>
+
       <Hero />
+      
       <FieldDashboard
         fieldProfile={fieldProfile}
         weather={weather}
