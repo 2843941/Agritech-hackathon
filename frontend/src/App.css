@@ -11,3 +11,85 @@
 .closing-section { padding:67px 0; background:#d9e597; }.closing-content { display:flex; align-items:center; justify-content:space-between; gap:27px; }.closing-mark { width:64px; height:64px; display:grid; place-items:center; flex:0 0 auto; color:#f1f5d0; background:var(--moss); border-radius:50%; }.closing-content > div:nth-child(2) { margin-right:auto; }.closing-content h2 { font-size:35px; }.closing-content p { margin:7px 0 0; color:#547052; font-size:13px; } footer { padding:28px 0; color:rgba(255,255,255,.72); background:#112e24; }.footer-inner { display:grid; grid-template-columns:1fr auto 1.4fr; align-items:center; gap:15px; font-size:10px; }.footer-brand { color:#fff; }.footer-brand .brand-mark { width:27px; height:27px; }.footer-inner p { margin:0; }.footer-disclaimer { justify-self:end; max-width:320px; text-align:right; color:rgba(255,255,255,.47); line-height:1.45; }
 @media (max-width:950px) { .hero-section { min-height:auto; }.hero { grid-template-columns:1fr; }.hero-copy { padding:75px 0 58px; }.hero-art { min-height:415px; margin:0 -24px; }.hero-card { top:50px; right:10%; }.section-intro,.soil-layout,.adviser-layout { grid-template-columns:1fr; display:grid; gap:35px; }.section-intro > p { width:auto; }.field-layout { grid-template-columns:1fr 1fr; }.field-profile { grid-column:1 / -1; min-height:290px; }.adviser-layout { gap:45px; }.adviser-copy > p { max-width:600px; } }
 @media (max-width:620px) { .container { width:min(100% - 32px,1180px); }.nav { height:76px; }.nav-links { display:none; }.nav-action { font-size:12px; }.nav-action svg { display:none; }.hero-copy { padding-top:68px; }.hero h1 { font-size:47px; }.hero-lede { font-size:15px; }.trust-row { gap:12px; }.hero-art { min-height:350px; }.sun-disc { top:56px; width:130px; height:130px; }.hero-card { top:42px; width:205px; }.dashboard-section,.soil-section,.adviser-section { padding:75px 0; }.field-layout { grid-template-columns:1fr; }.field-profile { grid-column:auto; }.weather-card,.soil-moisture,.field-profile { min-height:315px; }.section-intro h2,.soil-copy h2,.adviser-copy h2 { font-size:38px; }.soil-layout { gap:38px; }.moisture-display { margin-top:30px; }.scan-controls { align-items:flex-start; flex-direction:column; }.adviser-layout { gap:38px; }.closing-content { align-items:flex-start; flex-wrap:wrap; }.closing-content h2 { font-size:30px; }.closing-content > div:nth-child(2) { margin:0; }.footer-inner { grid-template-columns:1fr; }.footer-disclaimer { justify-self:start; text-align:left; }.hero-actions .button { width:100%; }.season-strip { align-items:flex-start; flex-direction:column; }.season-strip p { max-width:none; } }
+
+/* --- Watering reminders card (issue #18) --------------------------------- */
+.watering-card {
+  margin-top: 1.5rem;
+}
+
+.watering-card .due-badge {
+  margin-left: auto;
+  background: var(--moss);
+  color: var(--cream);
+  padding: 0.2rem 0.6rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.watering-empty {
+  color: var(--muted);
+  font-size: 0.95rem;
+  margin: 0.75rem 0 0;
+}
+
+.watering-empty.watering-good {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  color: var(--moss);
+}
+
+.watering-list {
+  list-style: none;
+  padding: 0;
+  margin: 0.75rem 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.watering-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.75rem 0.9rem;
+  background: var(--mist);
+  border-radius: 10px;
+}
+
+.watering-list li > div {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.watering-list strong {
+  font-size: 0.95rem;
+  color: var(--ink);
+}
+
+.watering-list span {
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.watering-list button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  background: var(--moss);
+  color: var(--cream);
+  border: none;
+  border-radius: 8px;
+  padding: 0.5rem 0.85rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.watering-list button:hover {
+  background: var(--leaf);
+}

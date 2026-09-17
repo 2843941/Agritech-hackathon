@@ -7,6 +7,7 @@ import AdviserChat from './components/AdviserChat';
 import Footer from './components/Footer';
 import FieldMap from './components/FieldMap';
 import CropRecommendations from './components/CropRecommendations';
+import WateringReminders from './components/WateringReminders';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
 
@@ -148,6 +149,7 @@ export default function App() {
       />
       <FieldMap onPick={loadFieldProfile} />
       <CropRecommendations fieldProfile={fieldProfile} />
+      <WateringReminders />
       <SoilScanner
         scanFile={scanFile}
         scanPreview={scanPreview}
