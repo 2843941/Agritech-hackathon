@@ -93,3 +93,8 @@
 .watering-list button:hover {
   background: var(--leaf);
 }
+/* --- Pest scanner (appended by pest-scanner branch) --- */
+.pest-section {
+  padding: 96px 0;
+  background: #f4f7f1;
+}

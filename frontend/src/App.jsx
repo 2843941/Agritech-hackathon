@@ -8,6 +8,7 @@ import Footer from './components/Footer';
 import FieldMap from './components/FieldMap';
 import CropRecommendations from './components/CropRecommendations';
 import WateringReminders from './components/WateringReminders';
+import PestScanner from './components/PestScanner';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
 
@@ -36,7 +37,11 @@ export default function App() {
   const [messageInput, setMessageInput] = useState('');
   const [chatLoading, setChatLoading] = useState(false);
   const [chatError, setChatError] = useState('');
-
+  const [pestFile, setPestFile] = useState(null);
+  const [pestPreview, setPestPreview] = useState('');
+  const [pestResult, setPestResult] = useState('');
+  const [pestLoading, setPestLoading] = useState(false);
+  const [pestError, setPestError] = useState('');
   const requestJson = async (path, options) => {
     const response = await fetch(`${API_BASE_URL}${path}`, {
       headers: { 'Content-Type': 'application/json' }, ...options,
@@ -114,7 +119,44 @@ export default function App() {
   };
 
   const removeScan = () => { setScanPreview(''); setScanFile(null); setScanResult(''); };
+  const selectPestFile = (file) => {
+  setPestError(''); setPestResult('');
+  if (!file) return;
+  if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) {
+    setPestError('Please choose a plant photo in JPG, PNG or WebP format.'); return;
+  }
+  if (file.size > 8 * 1024 * 1024) {
+    setPestError('Choose an image smaller than 8 MB so it can be analysed reliably.'); return;
+  }
+  setPestFile(file); setPestPreview(URL.createObjectURL(file));
+};
 
+const scanPest = async () => {
+  if (!pestFile) return;
+  setPestLoading(true); setPestError(''); setPestResult('');
+  try {
+    const image = await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result).split(',')[1]);
+      reader.onerror = reject;
+      reader.readAsDataURL(pestFile);
+    });
+    const result = await requestJson('/api/pest-analysis', {
+      method: 'POST',
+      body: JSON.stringify({
+        image,
+        mimeType: pestFile.type || 'image/jpeg',
+        location: fieldProfile?.location?.label || 'not provided',
+        weatherContext: fieldProfile?.summary || '',
+        crop: 'not specified',
+      }),
+    });
+    setPestResult(result.answer);
+  } catch (error) { setPestError(error.message); }
+  finally { setPestLoading(false); }
+};
+
+const removePest = () => { setPestPreview(''); setPestFile(null); setPestResult(''); };
   const sendMessage = async (event, presetQuestion) => {
     event?.preventDefault();
     const text = (presetQuestion || messageInput).trim();
@@ -159,6 +201,16 @@ export default function App() {
         onSelectFile={selectFile}
         onScan={scanSoil}
         onRemove={removeScan}
+      />
+      <PestScanner
+        pestFile={pestFile}
+        pestPreview={pestPreview}
+        pestResult={pestResult}
+        pestLoading={pestLoading}
+        pestError={pestError}
+        onSelectFile={selectPestFile}
+        onScan={scanPest}
+        onRemove={removePest}
       />
       <AdviserChat
         messages={messages}

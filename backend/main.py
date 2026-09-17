@@ -333,3 +333,35 @@ async def farm_chat(request: ChatRequest) -> dict:
         contents.append({'role': 'model' if message.role == 'assistant' else 'user', 'parts': [{'text': message.text}]})
     contents.append({'role': 'user', 'parts': [{'text': f'{context}\n\nFarmer question: {request.message}'}]})
     return {'answer': await gemini_answer(contents)}
+class PestRequest(BaseModel):
+    image: str = Field(min_length=100, max_length=7_000_000)
+    mimeType: Literal['image/jpeg', 'image/png', 'image/webp']
+    location: str = Field(default='not provided', max_length=120)
+    weatherContext: str = Field(default='', max_length=2000)
+    crop: str = Field(default='not specified', max_length=120)
+
+
+@app.post('/api/pest-analysis')
+async def pest_analysis(request: PestRequest) -> dict:
+    try:
+        base64.b64decode(request.image, validate=True)
+    except ValueError as error:
+        raise HTTPException(
+            status_code=422,
+            detail='That photo could not be read. Please take a new JPG or PNG photo.',
+        ) from error
+
+    prompt = f"""Review this photo of a plant leaf, stem or fruit as an initial visual field observation, not a laboratory diagnosis.
+Crop the farmer says this is: {request.crop}.
+Location shared by the farmer: {request.location}.
+Optional weather context: {request.weatherContext or 'none'}.
+Identify only what is visually supportable: leaf discolouration, spots, holes, wilting, mould, insects, eggs or frass. Name the most likely pest or disease group only if the visual evidence is clear, and say plainly when it is not. Then give 3 practical low-cost next steps a smallholder farmer can take this week. State clearly that a photo cannot confirm a disease, and that chemical treatment must follow the product label and local extension advice. Do not invent pesticide names or application rates. Keep it under 190 words."""
+
+    answer = await gemini_answer([{
+        'role': 'user',
+        'parts': [
+            {'text': prompt},
+            {'inlineData': {'mimeType': request.mimeType, 'data': request.image}},
+        ],
+    }])
+    return {'answer': answer}
