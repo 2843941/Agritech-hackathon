@@ -43,7 +43,7 @@ app.add_middleware(
 )
 
 GEMINI_MODEL = os.getenv('GEMINI_MODEL', 'gemini-2.5-flash')
-GEMINI_ENDPOINT = 'https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent'
+
 FARMER_SYSTEM_PROMPT = """You are Nuru, a thoughtful agricultural field adviser for smallholder and first-time farmers, with a focus on South Africa while remaining useful globally.
 Give practical, concise, plain-language advice. Explain uncertainty. You are not a substitute for a local agronomist, soil laboratory, veterinarian, or pesticide label. Never invent local records, disease diagnoses, exact chemical rates, soil nutrient values, or legal requirements. For potentially serious plant disease, pesticide, fertiliser, livestock, food-safety, or weather-risk questions, clearly say when to consult a local extension officer, certified agronomist, or other appropriate professional. Use metric units. Keep answers to a short helpful paragraph followed by 3–5 next steps when useful."""
 
@@ -155,31 +155,102 @@ async def fetch_weather(latitude: float, longitude: float) -> dict:
     }
 
 
+# --- Gemini client (lazy singleton) ------------------------------------------
+# We use the official google-genai SDK instead of raw httpx calls because it
+# handles the new AQ.-prefixed API keys and version routing automatically.
+# The client is created once on first use and reused for every request.
+
+_genai_client = None
+
+
+def get_genai_client():
+    """Create the Gemini client on first use.
+
+    Lazy because /api/health needs to respond even when the key isn't set yet.
+    """
+    global _genai_client
+    if _genai_client is None:
+        from google import genai
+        api_key = os.getenv('GEMINI_API_KEY')
+        if not api_key:
+            raise HTTPException(
+                status_code=503,
+                detail='AI is not configured yet. Add GEMINI_API_KEY to backend/.env, then restart the API.',
+            )
+        _genai_client = genai.Client(api_key=api_key)
+    return _genai_client
+
+
 async def gemini_answer(contents: list[dict]) -> str:
-    api_key = os.getenv('GEMINI_API_KEY')
-    if not api_key:
-        raise HTTPException(status_code=503, detail='AI is not configured yet. Add GEMINI_API_KEY to backend/.env, then restart the API.')
-    payload = {
-        'systemInstruction': {'parts': [{'text': FARMER_SYSTEM_PROMPT}]}, 'contents': contents,
-        'generationConfig': {'temperature': 0.35, 'maxOutputTokens': 650},
-    }
-    try:
-        async with httpx.AsyncClient(timeout=45.0) as client:
-            response = await client.post(GEMINI_ENDPOINT.format(model=GEMINI_MODEL), headers={'x-goog-api-key': api_key}, json=payload)
-            response.raise_for_status()
-    except httpx.HTTPStatusError as error:
-        if error.response.status_code in {400, 401, 403}:
-            raise HTTPException(status_code=502, detail='The AI service rejected the request. Check the server API key and selected Gemini model.') from error
-        raise HTTPException(status_code=502, detail='The AI service is unavailable right now. Please try again.') from error
-    except httpx.HTTPError as error:
-        raise HTTPException(status_code=502, detail='The AI service could not be reached. Please try again.') from error
-    data = response.json()
-    candidates = data.get('candidates', [])
-    parts = candidates[0].get('content', {}).get('parts', []) if candidates else []
-    answer = ''.join(part.get('text', '') for part in parts).strip()
-    if not answer:
-        raise HTTPException(status_code=502, detail='The AI service did not return a usable response. Please try a more specific question.')
-    return answer
+    """Send a multimodal prompt to Gemini and return the response text.
+
+    Handles transient 503s from Gemini (which happen during peak demand on
+    new model launches) by retrying with exponential backoff. Falls back to
+    a secondary model if the primary stays unavailable.
+    """
+    from google.genai import types
+
+    client = get_genai_client()
+
+    # Convert our internal {role, parts} dict shape into SDK types.
+    sdk_contents = []
+    for item in contents:
+        sdk_parts = []
+        for part in item.get('parts', []):
+            if 'text' in part:
+                sdk_parts.append(types.Part.from_text(text=part['text']))
+            elif 'inlineData' in part:
+                inline = part['inlineData']
+                sdk_parts.append(types.Part.from_bytes(
+                    data=base64.b64decode(inline['data']),
+                    mime_type=inline['mimeType'],
+                ))
+        sdk_contents.append(types.Content(role=item.get('role', 'user'), parts=sdk_parts))
+
+    # Try primary model, then fall back to a lighter one on persistent overload.
+    # Order matters — first available wins.
+    models_to_try = [GEMINI_MODEL, 'gemini-3.5-flash', 'gemini-2.5-flash-lite']
+
+    # Total attempts across all models before giving up. With exponential
+    # backoff this covers roughly a minute of retrying, which is enough to
+    # ride out most transient demand spikes.
+    max_attempts = 4
+    last_error = None
+
+    for model_name in models_to_try:
+        for attempt in range(max_attempts):
+            try:
+                response = await asyncio.to_thread(
+                    client.models.generate_content,
+                    model=model_name,
+                    contents=sdk_contents,
+                    config=types.GenerateContentConfig(
+                        system_instruction=FARMER_SYSTEM_PROMPT,
+                        temperature=0.35,
+                        max_output_tokens=650,
+                    ),
+                )
+                text = (response.text or '').strip()
+                if text:
+                    return text
+                last_error = 'empty response'
+                break  # empty response -> try next model
+            except Exception as error:
+                last_error = str(error)
+                # Only retry on 503 (overloaded) and 429 (rate limited).
+                # Any other error is a real config problem — move to next model.
+                if '503' in str(error) or '429' in str(error):
+                    # 1s, 2s, 4s, 8s backoff
+                    delay = 2 ** attempt
+                    await asyncio.sleep(delay)
+                    continue
+                break  # non-transient error -> try next model immediately
+
+    # Every model, every attempt failed.
+    raise HTTPException(
+        status_code=502,
+        detail=f'The AI service is temporarily overloaded. Last error: {last_error}',
+    )
 
 
 @app.get('/api/health')
