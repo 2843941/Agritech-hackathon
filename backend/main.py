@@ -1,7 +1,8 @@
 """Nuru Field API: weather context plus a server-side Gemini proxy.
 
-Keep GEMINI_API_KEY in backend/.env or the host's environment. It is intentionally
-never exposed to the React application or committed to source control.
+Keep GEMINI_API_KEY and WEATHERAPI_KEY in backend/.env or the host's
+environment. They are intentionally never exposed to the React application
+or committed to source control.
 """
 
 import asyncio
@@ -44,8 +45,13 @@ app.add_middleware(
 
 GEMINI_MODEL = os.getenv('GEMINI_MODEL', 'gemini-2.5-flash')
 
+# WeatherAPI.com — see fetch_weather() for why we use this instead of
+# Open-Meteo. The key must be set in backend/.env and on Render.
+WEATHERAPI_KEY = os.getenv('WEATHERAPI_KEY', '')
+WEATHERAPI_BASE = 'https://api.weatherapi.com/v1'
+
 FARMER_SYSTEM_PROMPT = """You are Nuru, a thoughtful agricultural field adviser for smallholder and first-time farmers, with a focus on South Africa while remaining useful globally.
-Give practical, concise, plain-language advice. Explain uncertainty. You are not a substitute for a local agronomist, soil laboratory, veterinarian, or pesticide label. Never invent local records, disease diagnoses, exact chemical rates, soil nutrient values, or legal requirements. For potentially serious plant disease, pesticide, fertiliser, livestock, food-safety, or weather-risk questions, clearly say when to consult a local extension officer, certified agronomist, or other appropriate professional. Use metric units. Keep answers to a short helpful paragraph followed by 3â€“5 next steps when useful."""
+Give practical, concise, plain-language advice. Explain uncertainty. You are not a substitute for a local agronomist, soil laboratory, veterinarian, or pesticide label. Never invent local records, disease diagnoses, exact chemical rates, soil nutrient values, or legal requirements. For potentially serious plant disease, pesticide, fertiliser, livestock, food-safety, or weather-risk questions, clearly say when to consult a local extension officer, certified agronomist, or other appropriate professional. Use metric units. Keep answers to a short helpful paragraph followed by 3–5 next steps when useful."""
 
 
 class Coordinates(BaseModel):
@@ -71,90 +77,133 @@ class ChatRequest(BaseModel):
     fieldContext: str = Field(default='', max_length=2500)
 
 
-WEATHER_CODES = {
-    0: 'Clear and calm', 1: 'Mostly clear', 2: 'Partly cloudy', 3: 'Overcast',
-    45: 'Foggy', 48: 'Icy fog', 51: 'Light drizzle', 53: 'Drizzle', 55: 'Heavy drizzle',
-    61: 'Light rain', 63: 'Rain showers', 65: 'Heavy rain', 71: 'Light snow',
-    80: 'Rain showers', 81: 'Moderate showers', 82: 'Heavy showers',
-    95: 'Thunderstorms', 96: 'Storm with hail', 99: 'Severe storm with hail',
-}
-
-
 def mean(values: list[float | int | None]) -> float:
     usable = [float(value) for value in values if value is not None]
     return round(sum(usable) / len(usable), 1) if usable else 0.0
 
 
+# --- Weather fetch via WeatherAPI.com ---------------------------------------
+# We previously used Open-Meteo. Their free tier rate-limits by IP address,
+# and Render's shared outbound IPs constantly hit "429 Too Many Requests".
+# WeatherAPI gives each user a personal key with a real quota, so the 429
+# problem goes away entirely.
+#
+# Return shape is intentionally identical to the old version so the frontend
+# and crop-recommendation endpoint don't need any changes.
+
 async def fetch_weather(latitude: float, longitude: float) -> dict:
     """Return a live snapshot and a same-month, 10-year seasonal weather signal."""
+    if not WEATHERAPI_KEY:
+        raise HTTPException(
+            status_code=503,
+            detail='Weather is not configured. Add WEATHERAPI_KEY to backend/.env.',
+        )
+
     today = date.today()
     start_year = today.year - 10
     end_year = today.year - 1
-    forecast_params = {
-        'latitude': latitude, 'longitude': longitude,
-        'current': 'temperature_2m,weather_code,wind_speed_10m,soil_moisture_0_to_1cm',
-        'hourly': 'precipitation_probability',
-        'daily': 'precipitation_probability_max,precipitation_sum',
-        'forecast_days': 2, 'timezone': 'auto',
-    }
-    archive_params = {
-        'latitude': latitude, 'longitude': longitude,
-        'daily': 'temperature_2m_mean,precipitation_sum',
-        'start_date': f'{start_year}-01-01', 'end_date': f'{end_year}-12-31', 'timezone': 'auto',
-    }
+    query = f'{latitude},{longitude}'
+
+    # WeatherAPI's history endpoint takes a single date per call. We sample
+    # the 15th of the current month for each of the last 10 years — that's
+    # enough to compute a same-month average without making 365 calls.
+    history_dates = [
+        f'{year}-{today.month:02d}-15'
+        for year in range(start_year, end_year + 1)
+    ]
+
     try:
         async with httpx.AsyncClient(timeout=18.0) as client:
-            forecast_response, archive_response = await asyncio.gather(
-                client.get('https://api.open-meteo.com/v1/forecast', params=forecast_params),
-                client.get('https://archive-api.open-meteo.com/v1/archive', params=archive_params),
+            # Fire the forecast and all 10 history calls in parallel so the
+            # total wall-clock time is one round trip, not eleven.
+            forecast_response = await client.get(
+                f'{WEATHERAPI_BASE}/forecast.json',
+                params={'key': WEATHERAPI_KEY, 'q': query, 'days': 2, 'aqi': 'no'},
             )
             forecast_response.raise_for_status()
-            archive_response.raise_for_status()
+
+            history_responses = await asyncio.gather(*[
+                client.get(
+                    f'{WEATHERAPI_BASE}/history.json',
+                    params={'key': WEATHERAPI_KEY, 'q': query, 'dt': d},
+                )
+                for d in history_dates
+            ], return_exceptions=True)
     except httpx.HTTPError as error:
-        # Log the underlying error before we mask it in the response.
-        # Without this, all we see in Render's logs is "502 Bad Gateway"
-        # with no reason â€” which is exactly what we were stuck on.
+        # Log the real error so future failures are diagnosable in Render's
+        # logs — otherwise we only see a generic 502 and have to guess.
         import traceback
-        print(f"[fetch_weather] httpx error: {type(error).__name__}: {error}", flush=True)
+        print(f'[fetch_weather] httpx error: {type(error).__name__}: {error}', flush=True)
         traceback.print_exc()
-        raise HTTPException(status_code=502, detail='Weather data is temporarily unavailable. Please try again shortly.') from error
+        raise HTTPException(
+            status_code=502,
+            detail='Weather data is temporarily unavailable. Please try again shortly.',
+        ) from error
 
     forecast = forecast_response.json()
-    archive = archive_response.json()
     current = forecast.get('current', {})
-    daily = forecast.get('daily', {})
-    hourly = forecast.get('hourly', {})
-    daily_history = archive.get('daily', {})
-    month = f'{today.month:02d}'
-    selected_indices = [index for index, day in enumerate(daily_history.get('time', [])) if day[5:7] == month]
-    historic_temperatures = [daily_history.get('temperature_2m_mean', [])[index] for index in selected_indices]
-    historic_rain = [daily_history.get('precipitation_sum', [])[index] for index in selected_indices]
-    precipitation_chances = [value for value in hourly.get('precipitation_probability', [])[:24] if value is not None]
-    rain_chance = max(precipitation_chances, default=daily.get('precipitation_probability_max', [None])[0] or 0)
-    surface_moisture = current.get('soil_moisture_0_to_1cm')
-    soil_moisture = round(float(surface_moisture) * 100) if surface_moisture is not None else '--'
-    condition = WEATHER_CODES.get(current.get('weather_code'), 'Local conditions')
-    daily_rain = daily.get('precipitation_sum', [0, 0])
-    next_rain = float(daily_rain[1] or 0) if len(daily_rain) > 1 else 0
+    forecast_days = forecast.get('forecast', {}).get('forecastday', [])
+    location_info = forecast.get('location', {})
+
+    # --- Live values ---
+    temperature = current.get('temp_c')
+    wind_kph = current.get('wind_kph')
+    condition = current.get('condition', {}).get('text', 'Local conditions')
+
+    # Chance of rain for today from the daily forecast block.
+    chance_of_rain = 0
+    if forecast_days:
+        chance_of_rain = forecast_days[0].get('day', {}).get('daily_chance_of_rain', 0) or 0
+
+    # Tomorrow's total rainfall.
+    next_rain = 0.0
+    if len(forecast_days) > 1:
+        next_rain = forecast_days[1].get('day', {}).get('totalprecip_mm', 0.0) or 0.0
+
+    # --- 10-year same-month averages from history ---
+    historic_temps = []
+    historic_rain = []
+    for resp in history_responses:
+        if isinstance(resp, Exception):
+            continue  # skip failed years quietly — we only need an average
+        try:
+            day = resp.json()['forecast']['forecastday'][0]['day']
+            historic_temps.append(day.get('avgtemp_c'))
+            historic_rain.append(day.get('totalprecip_mm') or 0.0)
+        except (KeyError, IndexError, ValueError):
+            continue
+
+    history_temp = round(mean(historic_temps), 1) if historic_temps else 0.0
+    history_rain = round(sum(historic_rain) / len(historic_rain), 1) if historic_rain else 0.0
     month_name = today.strftime('%B')
-    history_rain = round(sum(float(value or 0) for value in historic_rain) / max(end_year - start_year + 1, 1))
-    history_temp = mean(historic_temperatures)
+
     summary = (
         f'Approximate field coordinates: {latitude:.3f}, {longitude:.3f}. '
-        f'Live conditions: {condition.lower()}, {current.get("temperature_2m", "unknown")}Â°C, '
-        f'wind {current.get("wind_speed_10m", "unknown")} km/h. '
-        f'{month_name} seasonal signal ({start_year}â€“{end_year}): average temperature {history_temp}Â°C and average rainfall {history_rain} mm.'
+        f'Live conditions: {condition.lower()}, {temperature}°C, '
+        f'wind {wind_kph} km/h. '
+        f'{month_name} seasonal signal ({start_year}–{end_year}): '
+        f'average temperature {history_temp}°C and average rainfall {history_rain} mm.'
     )
+
     return {
-        'location': {'label': f'Your field Â· {latitude:.3f}, {longitude:.3f}'},
+        'location': {
+            'label': location_info.get('name') or f'Your field · {latitude:.3f}, {longitude:.3f}',
+            'latitude': latitude,
+            'longitude': longitude,
+        },
         'weather': {
-            'temperature': round(float(current.get('temperature_2m', 0))), 'condition': condition,
-            'wind': f'{round(float(current.get("wind_speed_10m", 0)))} km/h', 'rainChance': f'{round(float(rain_chance))}%',
-            'soilMoisture': soil_moisture,
+            'temperature': round(temperature) if temperature is not None else '--',
+            'condition': condition,
+            'wind': f'{round(wind_kph)} km/h' if wind_kph is not None else '--',
+            'rainChance': f'{round(chance_of_rain)}%',
+            # WeatherAPI doesn't expose soil moisture — this stays unknown
+            # until we wire a separate data source.
+            'soilMoisture': '--',
             'nextRain': f'{next_rain:.1f} mm forecast tomorrow.' if next_rain else 'No meaningful rain forecast tomorrow.',
         },
         'history': {
-            'period': f'{month_name} Â· {start_year}â€“{end_year}', 'rainfall': history_rain,
+            'period': f'{month_name} · {start_year}–{end_year}',
+            'rainfall': history_rain,
             'note': f'Average {month_name.lower()} rainfall and temperature from modelled historical weather. This is not a flood or drought record.',
         },
         'summary': summary,
@@ -214,12 +263,8 @@ async def gemini_answer(contents: list[dict]) -> str:
         sdk_contents.append(types.Content(role=item.get('role', 'user'), parts=sdk_parts))
 
     # Try primary model, then fall back to a lighter one on persistent overload.
-    # Order matters â€” first available wins.
     models_to_try = [GEMINI_MODEL, 'gemini-3.5-flash', 'gemini-2.5-flash-lite']
 
-    # Total attempts across all models before giving up. With exponential
-    # backoff this covers roughly a minute of retrying, which is enough to
-    # ride out most transient demand spikes.
     max_attempts = 4
     last_error = None
 
@@ -240,19 +285,16 @@ async def gemini_answer(contents: list[dict]) -> str:
                 if text:
                     return text
                 last_error = 'empty response'
-                break  # empty response -> try next model
+                break
             except Exception as error:
                 last_error = str(error)
                 # Only retry on 503 (overloaded) and 429 (rate limited).
-                # Any other error is a real config problem â€” move to next model.
                 if '503' in str(error) or '429' in str(error):
-                    # 1s, 2s, 4s, 8s backoff
                     delay = 2 ** attempt
                     await asyncio.sleep(delay)
                     continue
-                break  # non-transient error -> try next model immediately
+                break
 
-    # Every model, every attempt failed.
     raise HTTPException(
         status_code=502,
         detail=f'The AI service is temporarily overloaded. Last error: {last_error}',
