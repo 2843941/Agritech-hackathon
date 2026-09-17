@@ -5,6 +5,7 @@ import FieldDashboard from './components/FieldDashboard';
 import SoilScanner from './components/SoilScanner';
 import AdviserChat from './components/AdviserChat';
 import Footer from './components/Footer';
+import FieldMap from './components/FieldMap';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
 
@@ -144,6 +145,7 @@ export default function App() {
         locationLoading={locationLoading}
         onUseMyLocation={useMyLocation}
       />
+      <FieldMap onPick={loadFieldProfile} />
       <SoilScanner
         scanFile={scanFile}
         scanPreview={scanPreview}
