@@ -1,8 +1,8 @@
-"""Nuru Field API: weather context plus a server-side Gemini proxy.
+"""Nuru Field API: weather context plus a server-side Gemini proxy and Supabase backend.
 
-Keep GEMINI_API_KEY and WEATHERAPI_KEY in backend/.env or the host's
-environment. They are intentionally never exposed to the React application
-or committed to source control.
+Keep GEMINI_API_KEY, WEATHERAPI_KEY, SUPABASE_URL, and SUPABASE_SERVICE_KEY in
+backend/.env or the host's environment. They are intentionally never exposed
+to the React application or committed to source control.
 """
 
 import asyncio
@@ -13,9 +13,10 @@ from pathlib import Path
 from typing import Literal
 
 import httpx
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Header, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
+from supabase import create_client, Client
 
 
 def load_local_env() -> None:
@@ -40,15 +41,54 @@ app.add_middleware(
     allow_origins=[origin.strip() for origin in origins],
     allow_credentials=False,
     allow_methods=['POST', 'GET'],
-    allow_headers=['Content-Type'],
+    allow_headers=['Content-Type', 'Authorization'],
 )
 
 GEMINI_MODEL = os.getenv('GEMINI_MODEL', 'gemini-2.5-flash')
 
-# WeatherAPI.com — see fetch_weather() for why we use this instead of
-# Open-Meteo. The key must be set in backend/.env and on Render.
+# WeatherAPI.com setup
 WEATHERAPI_KEY = os.getenv('WEATHERAPI_KEY', '')
 WEATHERAPI_BASE = 'https://api.weatherapi.com/v1'
+
+# --- Supabase Initialization (Lazy/Graceful) --------------------------------
+# Initialized on demand to allow health checks even if credentials aren't set yet.
+_supabase_client: Client | None = None
+
+
+def get_supabase() -> Client:
+    global _supabase_client
+    if _supabase_client is None:
+        supabase_url = os.getenv("SUPABASE_URL")
+        supabase_service_key = os.getenv("SUPABASE_SERVICE_KEY")
+        if not supabase_url or not supabase_service_key:
+            raise HTTPException(
+                status_code=503,
+                detail="Database is not configured. Add SUPABASE_URL and SUPABASE_SERVICE_KEY to backend/.env."
+            )
+        _supabase_client = create_client(supabase_url, supabase_service_key)
+    return _supabase_client
+
+
+# JWT Auth Dependency for Protected User Routes
+async def get_current_user(authorization: str = Header(None)):
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Missing or invalid authorization header")
+
+    token = authorization.removeprefix("Bearer ").strip()
+    if not token:
+        raise HTTPException(status_code=401, detail="Missing or invalid authorization header")
+
+    try:
+        supabase = get_supabase()
+        user_response = supabase.auth.get_user(token)
+        if not user_response or not user_response.user:
+            raise HTTPException(status_code=401, detail="Invalid session or expired token")
+        return user_response.user
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=401, detail=f"Authentication failed: {str(e)}")
+
 
 FARMER_SYSTEM_PROMPT = """You are Nuru, a thoughtful agricultural field adviser for smallholder and first-time farmers, with a focus on South Africa while remaining useful globally.
 Give practical, concise, plain-language advice. Explain uncertainty. You are not a substitute for a local agronomist, soil laboratory, veterinarian, or pesticide label. Never invent local records, disease diagnoses, exact chemical rates, soil nutrient values, or legal requirements. For potentially serious plant disease, pesticide, fertiliser, livestock, food-safety, or weather-risk questions, clearly say when to consult a local extension officer, certified agronomist, or other appropriate professional. Use metric units. Keep answers to a short helpful paragraph followed by 3–5 next steps when useful."""
@@ -61,7 +101,7 @@ class Coordinates(BaseModel):
 
 class SoilRequest(BaseModel):
     image: str = Field(min_length=100, max_length=7_000_000)
-    mimeType: Literal['image/jpeg', 'image/png', 'image/webp']
+    mimeType: Literal['image/jpeg', 'image/png', 'image/webp'] = 'image/jpeg'
     location: str = Field(default='not provided', max_length=120)
     weatherContext: str = Field(default='', max_length=2000)
 
@@ -83,13 +123,6 @@ def mean(values: list[float | int | None]) -> float:
 
 
 # --- Weather fetch via WeatherAPI.com ---------------------------------------
-# We previously used Open-Meteo. Their free tier rate-limits by IP address,
-# and Render's shared outbound IPs constantly hit "429 Too Many Requests".
-# WeatherAPI gives each user a personal key with a real quota, so the 429
-# problem goes away entirely.
-#
-# Return shape is intentionally identical to the old version so the frontend
-# and crop-recommendation endpoint don't need any changes.
 
 async def fetch_weather(latitude: float, longitude: float) -> dict:
     """Return a live snapshot and a same-month, 10-year seasonal weather signal."""
@@ -104,9 +137,6 @@ async def fetch_weather(latitude: float, longitude: float) -> dict:
     end_year = today.year - 1
     query = f'{latitude},{longitude}'
 
-    # WeatherAPI's history endpoint takes a single date per call. We sample
-    # the 15th of the current month for each of the last 10 years — that's
-    # enough to compute a same-month average without making 365 calls.
     history_dates = [
         f'{year}-{today.month:02d}-15'
         for year in range(start_year, end_year + 1)
@@ -114,8 +144,6 @@ async def fetch_weather(latitude: float, longitude: float) -> dict:
 
     try:
         async with httpx.AsyncClient(timeout=18.0) as client:
-            # Fire the forecast and all 10 history calls in parallel so the
-            # total wall-clock time is one round trip, not eleven.
             forecast_response = await client.get(
                 f'{WEATHERAPI_BASE}/forecast.json',
                 params={'key': WEATHERAPI_KEY, 'q': query, 'days': 2, 'aqi': 'no'},
@@ -130,8 +158,6 @@ async def fetch_weather(latitude: float, longitude: float) -> dict:
                 for d in history_dates
             ], return_exceptions=True)
     except httpx.HTTPError as error:
-        # Log the real error so future failures are diagnosable in Render's
-        # logs — otherwise we only see a generic 502 and have to guess.
         import traceback
         print(f'[fetch_weather] httpx error: {type(error).__name__}: {error}', flush=True)
         traceback.print_exc()
@@ -145,27 +171,23 @@ async def fetch_weather(latitude: float, longitude: float) -> dict:
     forecast_days = forecast.get('forecast', {}).get('forecastday', [])
     location_info = forecast.get('location', {})
 
-    # --- Live values ---
     temperature = current.get('temp_c')
     wind_kph = current.get('wind_kph')
     condition = current.get('condition', {}).get('text', 'Local conditions')
 
-    # Chance of rain for today from the daily forecast block.
     chance_of_rain = 0
     if forecast_days:
         chance_of_rain = forecast_days[0].get('day', {}).get('daily_chance_of_rain', 0) or 0
 
-    # Tomorrow's total rainfall.
     next_rain = 0.0
     if len(forecast_days) > 1:
         next_rain = forecast_days[1].get('day', {}).get('totalprecip_mm', 0.0) or 0.0
 
-    # --- 10-year same-month averages from history ---
     historic_temps = []
     historic_rain = []
     for resp in history_responses:
         if isinstance(resp, Exception):
-            continue  # skip failed years quietly — we only need an average
+            continue
         try:
             day = resp.json()['forecast']['forecastday'][0]['day']
             historic_temps.append(day.get('avgtemp_c'))
@@ -196,8 +218,6 @@ async def fetch_weather(latitude: float, longitude: float) -> dict:
             'condition': condition,
             'wind': f'{round(wind_kph)} km/h' if wind_kph is not None else '--',
             'rainChance': f'{round(chance_of_rain)}%',
-            # WeatherAPI doesn't expose soil moisture — this stays unknown
-            # until we wire a separate data source.
             'soilMoisture': '--',
             'nextRain': f'{next_rain:.1f} mm forecast tomorrow.' if next_rain else 'No meaningful rain forecast tomorrow.',
         },
@@ -211,18 +231,11 @@ async def fetch_weather(latitude: float, longitude: float) -> dict:
 
 
 # --- Gemini client (lazy singleton) ------------------------------------------
-# We use the official google-genai SDK instead of raw httpx calls because it
-# handles the new AQ.-prefixed API keys and version routing automatically.
-# The client is created once on first use and reused for every request.
 
 _genai_client = None
 
 
 def get_genai_client():
-    """Create the Gemini client on first use.
-
-    Lazy because /api/health needs to respond even when the key isn't set yet.
-    """
     global _genai_client
     if _genai_client is None:
         from google import genai
@@ -236,18 +249,16 @@ def get_genai_client():
     return _genai_client
 
 
-async def gemini_answer(contents: list[dict]) -> str:
-    """Send a multimodal prompt to Gemini and return the response text.
-
-    Handles transient 503s from Gemini (which happen during peak demand on
-    new model launches) by retrying with exponential backoff. Falls back to
-    a secondary model if the primary stays unavailable.
-    """
+async def gemini_answer(
+    contents: list[dict],
+    *,
+    temperature: float = 0.35,
+    max_output_tokens: int = 650,
+) -> str:
     from google.genai import types
 
     client = get_genai_client()
 
-    # Convert our internal {role, parts} dict shape into SDK types.
     sdk_contents = []
     for item in contents:
         sdk_parts = []
@@ -262,7 +273,6 @@ async def gemini_answer(contents: list[dict]) -> str:
                 ))
         sdk_contents.append(types.Content(role=item.get('role', 'user'), parts=sdk_parts))
 
-    # Try primary model, then fall back to a lighter one on persistent overload.
     models_to_try = [GEMINI_MODEL, 'gemini-3.5-flash', 'gemini-2.5-flash-lite']
 
     max_attempts = 4
@@ -277,8 +287,8 @@ async def gemini_answer(contents: list[dict]) -> str:
                     contents=sdk_contents,
                     config=types.GenerateContentConfig(
                         system_instruction=FARMER_SYSTEM_PROMPT,
-                        temperature=0.35,
-                        max_output_tokens=650,
+                        temperature=temperature,
+                        max_output_tokens=max_output_tokens,
                     ),
                 )
                 text = (response.text or '').strip()
@@ -288,7 +298,6 @@ async def gemini_answer(contents: list[dict]) -> str:
                 break
             except Exception as error:
                 last_error = str(error)
-                # Only retry on 503 (overloaded) and 429 (rate limited).
                 if '503' in str(error) or '429' in str(error):
                     delay = 2 ** attempt
                     await asyncio.sleep(delay)
@@ -301,9 +310,15 @@ async def gemini_answer(contents: list[dict]) -> str:
     )
 
 
+# --- GENERAL ENDPOINTS ---
+
 @app.get('/api/health')
 async def health() -> dict:
-    return {'status': 'ok', 'aiConfigured': bool(os.getenv('GEMINI_API_KEY'))}
+    return {
+        'status': 'ok',
+        'aiConfigured': bool(os.getenv('GEMINI_API_KEY')),
+        'dbConfigured': bool(os.getenv('SUPABASE_URL') and os.getenv('SUPABASE_SERVICE_KEY'))
+    }
 
 
 @app.post('/api/field-profile')
@@ -317,11 +332,22 @@ async def soil_analysis(request: SoilRequest) -> dict:
         base64.b64decode(request.image, validate=True)
     except ValueError as error:
         raise HTTPException(status_code=422, detail='That photo could not be read. Please take a new JPG or PNG photo.') from error
-    prompt = f"""Review this photo of soil as an initial visual field observation, not a laboratory test.
-Location shared by the farmer: {request.location}.
-Optional weather context: {request.weatherContext or 'none'}.
-Describe only visually supportable clues about colour, texture, compaction, stones, residue, moisture or drainage. Then give 3 practical low-cost next checks or actions. Clearly state that pH, nutrients, salinity and contamination cannot be determined from a photo. Keep it under 190 words."""
-    answer = await gemini_answer([{'role': 'user', 'parts': [{'text': prompt}, {'inlineData': {'mimeType': request.mimeType, 'data': request.image}}]}])
+    prompt = f"""You are Nuru, an expert agricultural soil advisor. Analyze this soil photo and provide a concise visual assessment. Do not write lengthy disclaimers; jump straight into the insights.
+
+Location: {request.location}
+Weather Context: {request.weatherContext or 'not provided'}
+
+Format the output concisely using exactly these markdown bullet points:
+* **Soil Texture**: Observation on the sand, clay, and loam balance.
+* **Moisture & Organic Matter**: Darkness, moisture, drainage, and organic matter indicators.
+* **Recommended Action**: One practical step for planting preparation.
+
+Only describe what can be visually supported by the image. Do not claim exact pH, nutrient levels, salinity, contamination, or a definitive diagnosis."""
+    answer = await gemini_answer(
+        [{'role': 'user', 'parts': [{'text': prompt}, {'inlineData': {'mimeType': request.mimeType, 'data': request.image}}]}],
+        temperature=0.4,
+        max_output_tokens=1000,
+    )
     return {'answer': answer}
 
 
@@ -333,3 +359,42 @@ async def farm_chat(request: ChatRequest) -> dict:
         contents.append({'role': 'model' if message.role == 'assistant' else 'user', 'parts': [{'text': message.text}]})
     contents.append({'role': 'user', 'parts': [{'text': f'{context}\n\nFarmer question: {request.message}'}]})
     return {'answer': await gemini_answer(contents)}
+
+
+# --- DATASET & USER ENDPOINTS (SUPABASE) ---
+
+@app.get("/api/crops")
+def get_crop_recommendations():
+    """Fetch reference crops for recommendations"""
+    supabase = get_supabase()
+    response = supabase.table("crop_reference").select("*").execute()
+    return {"status": "success", "crops": response.data}
+
+
+@app.get("/api/market-snapshot")
+def get_market_snapshot():
+    """Fetch market reference price benchmarks"""
+    supabase = get_supabase()
+    response = supabase.table("market_reference").select("*").execute()
+    return {"status": "success", "market": response.data}
+
+
+@app.get('/api/plants')
+def get_user_plants(user=Depends(get_current_user)):
+    """Fetch the authenticated user's tracked plants."""
+    supabase = get_supabase()
+    response = supabase.table("plants").select("*").eq("user_id", user.id).execute()
+    return response.data
+
+
+@app.post('/api/plants')
+def create_user_plant(plant_data: dict, user=Depends(get_current_user)):
+    """Add a plant owned by the authenticated user."""
+    supabase = get_supabase()
+    new_plant = {
+        "user_id": user.id,
+        "name": plant_data.get("name"),
+        "crop_type": plant_data.get("crop_type"),
+    }
+    response = supabase.table("plants").insert(new_plant).execute()
+    return response.data

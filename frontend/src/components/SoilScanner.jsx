@@ -1,4 +1,5 @@
 import { useRef } from 'react';
+import ReactMarkdown from 'react-markdown';
 import Icon from './Icon';
 
 export default function SoilScanner({
@@ -56,7 +57,9 @@ export default function SoilScanner({
           {scanResult && (
             <div className="scan-result">
               <div><span>AI SOIL OBSERVATION</span><Icon name="spark" size={18} /></div>
-              <p>{scanResult}</p>
+              <div className="scan-result-content">
+                <ReactMarkdown>{scanResult}</ReactMarkdown>
+              </div>
             </div>
           )}
         </div>
