@@ -45,7 +45,7 @@ app.add_middleware(
 GEMINI_MODEL = os.getenv('GEMINI_MODEL', 'gemini-2.5-flash')
 
 FARMER_SYSTEM_PROMPT = """You are Nuru, a thoughtful agricultural field adviser for smallholder and first-time farmers, with a focus on South Africa while remaining useful globally.
-Give practical, concise, plain-language advice. Explain uncertainty. You are not a substitute for a local agronomist, soil laboratory, veterinarian, or pesticide label. Never invent local records, disease diagnoses, exact chemical rates, soil nutrient values, or legal requirements. For potentially serious plant disease, pesticide, fertiliser, livestock, food-safety, or weather-risk questions, clearly say when to consult a local extension officer, certified agronomist, or other appropriate professional. Use metric units. Keep answers to a short helpful paragraph followed by 3–5 next steps when useful."""
+Give practical, concise, plain-language advice. Explain uncertainty. You are not a substitute for a local agronomist, soil laboratory, veterinarian, or pesticide label. Never invent local records, disease diagnoses, exact chemical rates, soil nutrient values, or legal requirements. For potentially serious plant disease, pesticide, fertiliser, livestock, food-safety, or weather-risk questions, clearly say when to consult a local extension officer, certified agronomist, or other appropriate professional. Use metric units. Keep answers to a short helpful paragraph followed by 3â€“5 next steps when useful."""
 
 
 class Coordinates(BaseModel):
@@ -111,6 +111,12 @@ async def fetch_weather(latitude: float, longitude: float) -> dict:
             forecast_response.raise_for_status()
             archive_response.raise_for_status()
     except httpx.HTTPError as error:
+        # Log the underlying error before we mask it in the response.
+        # Without this, all we see in Render's logs is "502 Bad Gateway"
+        # with no reason â€” which is exactly what we were stuck on.
+        import traceback
+        print(f"[fetch_weather] httpx error: {type(error).__name__}: {error}", flush=True)
+        traceback.print_exc()
         raise HTTPException(status_code=502, detail='Weather data is temporarily unavailable. Please try again shortly.') from error
 
     forecast = forecast_response.json()
@@ -135,12 +141,12 @@ async def fetch_weather(latitude: float, longitude: float) -> dict:
     history_temp = mean(historic_temperatures)
     summary = (
         f'Approximate field coordinates: {latitude:.3f}, {longitude:.3f}. '
-        f'Live conditions: {condition.lower()}, {current.get("temperature_2m", "unknown")}°C, '
+        f'Live conditions: {condition.lower()}, {current.get("temperature_2m", "unknown")}Â°C, '
         f'wind {current.get("wind_speed_10m", "unknown")} km/h. '
-        f'{month_name} seasonal signal ({start_year}–{end_year}): average temperature {history_temp}°C and average rainfall {history_rain} mm.'
+        f'{month_name} seasonal signal ({start_year}â€“{end_year}): average temperature {history_temp}Â°C and average rainfall {history_rain} mm.'
     )
     return {
-        'location': {'label': f'Your field · {latitude:.3f}, {longitude:.3f}'},
+        'location': {'label': f'Your field Â· {latitude:.3f}, {longitude:.3f}'},
         'weather': {
             'temperature': round(float(current.get('temperature_2m', 0))), 'condition': condition,
             'wind': f'{round(float(current.get("wind_speed_10m", 0)))} km/h', 'rainChance': f'{round(float(rain_chance))}%',
@@ -148,7 +154,7 @@ async def fetch_weather(latitude: float, longitude: float) -> dict:
             'nextRain': f'{next_rain:.1f} mm forecast tomorrow.' if next_rain else 'No meaningful rain forecast tomorrow.',
         },
         'history': {
-            'period': f'{month_name} · {start_year}–{end_year}', 'rainfall': history_rain,
+            'period': f'{month_name} Â· {start_year}â€“{end_year}', 'rainfall': history_rain,
             'note': f'Average {month_name.lower()} rainfall and temperature from modelled historical weather. This is not a flood or drought record.',
         },
         'summary': summary,
@@ -208,7 +214,7 @@ async def gemini_answer(contents: list[dict]) -> str:
         sdk_contents.append(types.Content(role=item.get('role', 'user'), parts=sdk_parts))
 
     # Try primary model, then fall back to a lighter one on persistent overload.
-    # Order matters — first available wins.
+    # Order matters â€” first available wins.
     models_to_try = [GEMINI_MODEL, 'gemini-3.5-flash', 'gemini-2.5-flash-lite']
 
     # Total attempts across all models before giving up. With exponential
@@ -238,7 +244,7 @@ async def gemini_answer(contents: list[dict]) -> str:
             except Exception as error:
                 last_error = str(error)
                 # Only retry on 503 (overloaded) and 429 (rate limited).
-                # Any other error is a real config problem — move to next model.
+                # Any other error is a real config problem â€” move to next model.
                 if '503' in str(error) or '429' in str(error):
                     # 1s, 2s, 4s, 8s backoff
                     delay = 2 ** attempt
