@@ -224,9 +224,9 @@ Deployment is Track C's responsibility. The backend must be live before the fron
 
 | Question | Ask |
 |---|---|
-| Supabase keys, DB schema, backend endpoints | Banele (Track A) |
-| Map, crops UI, `App.jsx` composition | Track B owner |
-| Deploy URLs, Gemini key, pitch script | Track C owner |
+| Supabase keys, DB schema, backend endpoints | Andile |
+| Map, crops UI, `App.jsx` composition | Banele |
+| Deploy URLs, Gemini key, pitch script | Siboniso |
 | "Should I edit this file?" | Whoever owns the file — ask, don't guess |
 
 ---
