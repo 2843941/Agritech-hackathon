@@ -84,6 +84,19 @@ export default function App() {
       setFieldProfile(profile);
       setWeather(profile.weather);
       setLocationStatus(`Field profile ready for ${profile.location.label}.`);
+
+      if (authToken) {
+        await requestJson('/api/save-field', {
+          method: 'POST',
+          body: JSON.stringify({
+            label: profile.location.label,
+            latitude,
+            longitude,
+            summary: profile.summary || '',
+            notes: 'Saved from map interaction',
+          }),
+        });
+      }
     } catch (error) { setLocationStatus(error.message); }
     finally { setLocationLoading(false); }
   };
