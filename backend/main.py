@@ -11,6 +11,7 @@ import os
 from datetime import date
 from pathlib import Path
 from typing import Literal
+from uuid import UUID
 
 import httpx
 from fastapi import FastAPI, HTTPException, Header, Depends
@@ -104,6 +105,14 @@ class SoilRequest(BaseModel):
     mimeType: Literal['image/jpeg', 'image/png', 'image/webp'] = 'image/jpeg'
     location: str = Field(default='not provided', max_length=120)
     weatherContext: str = Field(default='', max_length=2000)
+
+
+class PlantRequest(BaseModel):
+    image: str = Field(min_length=100, max_length=7_000_000)
+    mimeType: Literal['image/jpeg', 'image/png', 'image/webp'] = 'image/jpeg'
+    location: str = Field(default='not provided', max_length=120)
+    weatherContext: str = Field(default='', max_length=2000)
+    plant_id: UUID | None = None
 
 
 class ChatMessage(BaseModel):
@@ -380,6 +389,56 @@ Only describe what can be visually supported by the image. Do not claim exact pH
     except Exception as exc:
         print('Error in analyze_soil:', str(exc))
         raise HTTPException(status_code=500, detail=f'Soil vision analysis succeeded, but the database save failed: {str(exc)}') from exc
+
+    return {'answer': answer}
+
+
+@app.post('/api/plant-analysis')
+async def plant_analysis(request: PlantRequest, user=Depends(get_current_user)) -> dict:
+    try:
+        raw_image = request.image or ''
+        if ',' in raw_image:
+            raw_image = raw_image.split(',', 1)[1]
+        image_bytes = base64.b64decode(raw_image, validate=False)
+    except (TypeError, ValueError) as error:
+        raise HTTPException(status_code=422, detail='That plant photo could not be read. Please take a new JPG or PNG photo.') from error
+
+    prompt = f"""You are Nuru, an expert agricultural crop adviser. Analyze this plant photo and provide a concise visual assessment for a farmer.
+
+Location: {request.location}
+Weather Context: {request.weatherContext or 'not provided'}
+
+Format the output concisely using exactly these markdown bullet points:
+* **Visible Plant Condition**: Describe only visible colour, growth, leaf, stem, fruit, or canopy observations.
+* **Possible Stress Signals**: Mention visible signs that could be consistent with pests, disease, water stress, or nutrient stress, but clearly label them as possibilities rather than diagnoses.
+* **Recommended Action**: Give one practical next step for inspecting or caring for the plant.
+
+If the image is unclear or does not show a plant, say so plainly and recommend taking a closer, well-lit photo. Never invent a crop type, disease, pest, nutrient level, or treatment. Do not claim a definitive diagnosis from an image alone."""
+    answer = await gemini_answer(
+        [{'role': 'user', 'parts': [{'text': prompt}, {'inlineData': {'mimeType': request.mimeType, 'data': base64.b64encode(image_bytes).decode('ascii')}}]}],
+        temperature=0.25,
+        max_output_tokens=1000,
+    )
+
+    supabase = get_supabase()
+    try:
+        payload = {
+            'user_id': user.id,
+            'photo_url': 'placeholder_base64_upload',
+            'analysis_result': answer,
+            'location': request.location,
+        }
+        if request.plant_id:
+            payload['plant_id'] = str(request.plant_id)
+
+        db_response = supabase.table('plant_photos').insert(payload).execute()
+        print('Saved plant photo analysis to Supabase:', db_response)
+    except Exception as exc:
+        print('Error in analyze_plant:', str(exc))
+        raise HTTPException(
+            status_code=500,
+            detail=f'Plant vision analysis succeeded, but the database save failed: {str(exc)}',
+        ) from exc
 
     return {'answer': answer}
 

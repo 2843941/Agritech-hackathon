@@ -137,3 +137,57 @@
 .watering-list button:hover {
   background: var(--leaf);
 }
+
+.plant-section {
+  padding: 112px 0;
+  background: #edf0e5;
+}
+
+.plant-layout {
+  display: grid;
+  grid-template-columns: .9fr 1.1fr;
+  align-items: center;
+  gap: 80px;
+}
+
+.plant-copy > p {
+  max-width: 442px;
+  margin: 24px 0;
+  color: var(--muted);
+  font-size: 16px;
+  line-height: 1.7;
+}
+
+.plant-scanner {
+  overflow: hidden;
+  min-height: 353px;
+}
+
+.plant-upload-area {
+  min-height: 353px;
+  padding: 60px 30px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  border: 1px dashed #aec2a6;
+  text-align: center;
+  cursor: pointer;
+  transition: background .2s;
+}
+
+.plant-upload-area:hover {
+  background: #f7f9f0;
+}
+
+.plant-upload-area strong {
+  font-family: 'Playfair Display';
+  font-size: 23px;
+  font-weight: 500;
+}
+
+.plant-upload-area p {
+  margin: 8px 0 23px;
+  color: var(--muted);
+  font-size: 13px;
+}

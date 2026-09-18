@@ -10,6 +10,7 @@ import CropRecommendations from './components/CropRecommendations';
 import WateringReminders from './components/WateringReminders';
 import AuthModal from './components/AuthModal';
 import Icon from './components/Icon';
+import { PlantManager } from './components/PlantManager';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
 
@@ -216,6 +217,9 @@ export default function App() {
       <FieldMap onPick={loadFieldProfile} />
       <CropRecommendations fieldProfile={fieldProfile} />
       <WateringReminders />
+      <div className="container" style={{ marginTop: '2rem' }}>
+        <PlantManager authToken={authToken} apiBaseUrl={API_BASE_URL} />
+      </div>
       <SoilScanner
         scanFile={scanFile}
         scanPreview={scanPreview}
