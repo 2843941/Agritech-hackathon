@@ -103,69 +103,71 @@ export default function AuthModal({ onAuthenticated }) {
   };
 
   return (
-    <div className="auth-shell">
-      <section className="auth-intro">
-        <div className="auth-intro-top">
-          <span className="auth-mini-mark"><Icon name="leaf" size={18} /></span>
-          <span>NURU FIELD ADVISER</span>
-        </div>
-        <div className="auth-intro-copy">
-          <p className="auth-kicker">YOUR FIELD, IN FOCUS</p>
-          <h1>Grow with a little more certainty.</h1>
-          <p>Practical guidance for healthier crops, smarter watering, and better days in the field.</p>
-        </div>
-        <div className="auth-stats" aria-label="App benefits">
-          <span><strong>01</strong> Local insight</span>
-          <span><strong>02</strong> Simple decisions</span>
-        </div>
-      </section>
+    <div className="auth-page">
+      <div className="auth-shell">
+        <section className="auth-intro">
+          <div className="auth-intro-top">
+            <span className="auth-mini-mark"><Icon name="leaf" size={18} /></span>
+            <span>NURU FIELD ADVISER</span>
+          </div>
+          <div className="auth-intro-copy">
+            <p className="auth-kicker">YOUR FIELD, IN FOCUS</p>
+            <h1>Grow with a little more certainty.</h1>
+            <p>Practical guidance for healthier crops, smarter watering, and better days in the field.</p>
+          </div>
+          <div className="auth-stats" aria-label="App benefits">
+            <span><strong>01</strong> Local insight</span>
+            <span><strong>02</strong> Simple decisions</span>
+          </div>
+        </section>
 
-      <section className="auth-form-panel">
-        <div className="auth-form-heading">
-          <p className="auth-kicker">WELCOME BACK</p>
-          <h2>Enter your field notes.</h2>
-          <p>Sign in to continue your growing journey.</p>
-        </div>
+        <section className="auth-form-panel">
+          <div className="auth-form-heading">
+            <p className="auth-kicker">WELCOME BACK</p>
+            <h2>Enter your field notes.</h2>
+            <p>Sign in to continue your growing journey.</p>
+          </div>
 
-        <form className="auth-form" onSubmit={handleSignIn}>
-          <label htmlFor="auth-email">Email address</label>
-          <input
-            id="auth-email"
-            type="email"
-            placeholder="you@example.com"
-            value={email}
-            onChange={handleEmailChange}
-            autoComplete="email"
-            required
-          />
+          <form className="auth-form" onSubmit={handleSignIn}>
+            <label htmlFor="auth-email">Email address</label>
+            <input
+              id="auth-email"
+              type="email"
+              placeholder="you@example.com"
+              value={email}
+              onChange={handleEmailChange}
+              autoComplete="email"
+              required
+            />
 
-          <label htmlFor="auth-password">Password</label>
-          <input
-            id="auth-password"
-            type="password"
-            placeholder="Enter your password"
-            value={password}
-            onChange={handlePasswordChange}
-            autoComplete="current-password"
-            required
-          />
+            <label htmlFor="auth-password">Password</label>
+            <input
+              id="auth-password"
+              type="password"
+              placeholder="Enter your password"
+              value={password}
+              onChange={handlePasswordChange}
+              autoComplete="current-password"
+              required
+            />
 
-          <button className="auth-submit button button-dark" type="submit" disabled={loading}>
-            {loading ? 'Working…' : 'Sign in'}
-            {!loading && <Icon name="arrow" size={17} />}
-          </button>
+            <button className="auth-submit button button-dark" type="submit" disabled={loading}>
+              {loading ? 'Working…' : 'Sign in'}
+              {!loading && <Icon name="arrow" size={17} />}
+            </button>
 
-          <button className="auth-signup" type="button" onClick={handleSignUp} disabled={loading}>
-            New here? <strong>Create an account</strong>
-          </button>
-        </form>
+            <button className="auth-signup" type="button" onClick={handleSignUp} disabled={loading}>
+              New here? <strong>Create an account</strong>
+            </button>
+          </form>
 
-        {message && (
-          <p className={`auth-message ${error ? 'auth-error' : 'auth-success'}`} role="status">
-            {message}
-          </p>
-        )}
-      </section>
+          {message && (
+            <p className={`auth-message ${error ? 'auth-error' : 'auth-success'}`} role="status">
+              {message}
+            </p>
+          )}
+        </section>
+      </div>
     </div>
   );
 }
