@@ -410,3 +410,52 @@
   padding: 0.1rem 0.35rem;
   border-radius: 4px;
 }
+
+/* --- Scan page: tabs combining Soil scan + Adviser chat ----------------- */
+.scan-page {
+  padding: 3rem 0 4rem;
+}
+
+.scan-tabs {
+  padding: 0;
+  overflow: hidden;
+}
+
+.scan-tabs-header {
+  display: flex;
+  border-bottom: 1px solid var(--mist);
+  background: var(--paper);
+}
+
+.scan-tab {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 1rem 1.25rem;
+  font-size: 0.95rem;
+  font-weight: 600;
+  background: transparent;
+  color: var(--muted);
+  border: none;
+  border-bottom: 2px solid transparent;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s, background 0.15s;
+}
+
+.scan-tab:hover {
+  color: var(--ink);
+  background: var(--mist);
+}
+
+.scan-tab.active {
+  color: var(--moss);
+  border-bottom-color: var(--leaf);
+  background: var(--cream);
+}
+
+.scan-tabs-body {
+  /* Inner components may have their own top margin — collapse it. */
+  padding: 0;
+}
