@@ -1,14 +1,12 @@
 ﻿// FieldPage — everything about the field: weather, location picker,
-// crop recommendations, market prices, watering reminders.
-// Receives shared state as props from App.jsx (kept in one place to avoid
-// React Context for the hackathon).
+// crop recommendations, market prices, plants + watering reminders.
 
 import FieldDashboard from '../components/FieldDashboard'
 import FieldMap from '../components/FieldMap'
 import CropRecommendations from '../components/CropRecommendations'
 import MarketSnapshot from '../components/MarketSnapshot'
+import MyPlants from '../components/MyPlants'
 import WateringReminders from '../components/WateringReminders'
-import { PlantManager } from '../components/PlantManager'
 
 export default function FieldPage({
   fieldProfile,
@@ -17,8 +15,6 @@ export default function FieldPage({
   locationLoading,
   onUseMyLocation,
   onMapPick,
-  authToken,
-  apiBaseUrl,
 }) {
   return (
     <main>
@@ -32,10 +28,8 @@ export default function FieldPage({
       <FieldMap onPick={onMapPick} />
       <CropRecommendations fieldProfile={fieldProfile} />
       <MarketSnapshot fieldProfile={fieldProfile} />
+      <MyPlants />
       <WateringReminders />
-      <div className="container" style={{ marginTop: '2rem' }}>
-        <PlantManager authToken={authToken} apiBaseUrl={apiBaseUrl} />
-      </div>
     </main>
   )
 }

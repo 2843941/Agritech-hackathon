@@ -573,3 +573,152 @@
 .map-suggestions button:hover {
   background: var(--mist);
 }
+
+/* --- My Plants: add form + list --------------------------------------- */
+.my-plants {
+  margin-top: 1.5rem;
+}
+
+.plant-count {
+  margin-left: auto;
+  background: var(--moss);
+  color: var(--cream);
+  padding: 0.15rem 0.65rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.plant-add-form {
+  margin: 0.75rem 0 1rem;
+  padding: 0.9rem;
+  background: var(--mist);
+  border-radius: 10px;
+}
+
+.plant-add-row {
+  display: grid;
+  grid-template-columns: 1.4fr 1fr 1fr auto;
+  gap: 0.6rem;
+  align-items: end;
+}
+
+.plant-add-row label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.plant-add-row input,
+.plant-add-row select {
+  font-family: inherit;
+  font-size: 0.9rem;
+  padding: 0.5rem 0.65rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--paper);
+  color: var(--ink);
+}
+
+.plant-add-row input:focus,
+.plant-add-row select:focus {
+  outline: 2px solid var(--leaf);
+  outline-offset: -1px;
+  border-color: transparent;
+}
+
+.plant-add-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.55rem 0.9rem;
+  background: var(--moss);
+  color: var(--cream);
+  border: none;
+  border-radius: 8px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.plant-add-button:hover {
+  background: var(--leaf);
+}
+
+.plant-empty {
+  color: var(--muted);
+  font-size: 0.9rem;
+  margin: 0.5rem 0 0;
+}
+
+.plant-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.plant-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.7rem 0.9rem;
+  background: var(--paper);
+  border: 1px solid var(--mist);
+  border-radius: 10px;
+}
+
+.plant-info {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.plant-info strong {
+  font-size: 0.95rem;
+  color: var(--ink);
+}
+
+.plant-meta {
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.plant-delete {
+  background: transparent;
+  border: 1px solid var(--mist);
+  color: var(--muted);
+  border-radius: 6px;
+  width: 30px;
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+.plant-delete:hover {
+  color: #721c24;
+  border-color: #f8d7da;
+  background: #f8d7da;
+}
+
+@media (max-width: 720px) {
+  .plant-add-row {
+    grid-template-columns: 1fr 1fr;
+  }
+  .plant-add-button {
+    grid-column: 1 / -1;
+    justify-content: center;
+  }
+}
