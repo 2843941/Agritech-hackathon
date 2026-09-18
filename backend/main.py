@@ -566,11 +566,58 @@ async def get_crop_recommendations(lat: float, lon: float):
 
 
 @app.get("/api/market-snapshot")
-def get_market_snapshot():
-    """Fetch market reference price benchmarks"""
+async def get_market_snapshot(lat: float, lon: float):
+    """Return market price benchmarks for the province of (lat, lon).
+
+    Mapping from province to market_location (approximate — each province
+    is served by one main fresh-produce market in our dataset):
+      Western Cape   -> Cape Town Market
+      KwaZulu-Natal  -> Durban Market
+      Free State     -> Bloemfontein Market
+      Limpopo        -> Polokwane Market
+      Mpumalanga     -> Mbombela Market
+      Northern Cape  -> Kimberley Market
+      North West     -> Mahikeng Market
+      Eastern Cape   -> Mthatha Market
+      Gauteng        -> Johannesburg Market (Tshwane is also Gauteng)
+
+    If the province can't be determined, returns all markets. If the
+    province has no rows in the dataset, also returns all markets
+    rather than an empty list.
+    """
     supabase = get_supabase()
+
+    province = province_from_coords(lat, lon)
+
+    # Map province → closest market in our dataset.
+    province_market = {
+        'Western Cape':   'Cape Town Market',
+        'KwaZulu-Natal':  'Durban Market',
+        'Free State':     'Bloemfontein Market',
+        'Limpopo':        'Polokwane Market',
+        'Mpumalanga':     'Mbombela Market',
+        'Northern Cape':  'Kimberley Market',
+        'North West':     'Mahikeng Market',
+        'Eastern Cape':   'Mthatha Market',
+        'Gauteng':        'Johannesburg Market',
+    }
+
+    target_market = province_market.get(province) if province else None
+
+    if target_market:
+        response = supabase.table("market_reference").select("*").eq("market_location", target_market).execute()
+        rows = response.data or []
+        if rows:
+            return {"status": "success", "province": province, "market_location": target_market, "market": rows}
+
+    # Fallback — return every market so the user still sees data.
     response = supabase.table("market_reference").select("*").execute()
-    return {"status": "success", "market": response.data}
+    return {
+        "status": "success",
+        "province": province,
+        "market_location": "National snapshot",
+        "market": response.data or [],
+    }
 
 
 @app.get('/api/plants')
