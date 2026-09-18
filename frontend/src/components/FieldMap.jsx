@@ -28,12 +28,30 @@ L.Icon.Default.mergeOptions({
   shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
 })
 
+// Normalize lat/lon into valid ranges.
+//
+// Leaflet hands back wrapped longitudes when the user pans past the
+// antimeridian — e.g. clicking in the Pacific near Australia returns
+// values like 304.98 instead of -55.02. Those break the backend
+// (longitude must be -180..180) and also confuse the marker display.
+//
+// Longitude wraps cyclically, so we do the proper modular arithmetic:
+//   -190°  ->  170°
+//    190°  -> -170°
+// Latitude doesn't wrap (it just clips), so we clamp it.
+function normalizeCoords(lat, lon) {
+  const wrappedLon = ((lon + 180) % 360 + 360) % 360 - 180
+  const clampedLat = Math.max(-90, Math.min(90, lat))
+  return [clampedLat, wrappedLon]
+}
+
 // Attaches the click handler to the Leaflet map instance.
 function ClickPicker({ onPick }) {
   useMapEvents({
     click(event) {
       const { lat, lng } = event.latlng
-      onPick(lat, lng)
+      const [safeLat, safeLon] = normalizeCoords(lat, lng)
+      onPick(safeLat, safeLon)
     },
   })
   return null
@@ -57,19 +75,18 @@ export default function FieldMap({ onPick }) {
   const debounceRef = useRef(null)
 
   const handlePick = (lat, lon) => {
-    setMarker([lat, lon])
-    onPick(lat, lon)
+    // Safety net: if anything else ever hands us out-of-range coords,
+    // normalize before showing them.
+    const [safeLat, safeLon] = normalizeCoords(lat, lon)
+    setMarker([safeLat, safeLon])
+    onPick(safeLat, safeLon)
   }
 
   // Debounced autocomplete effect.
-  // Runs whenever `query` changes. Cancels any previous pending fetch so
-  // fast typing doesn't queue up requests.
   useEffect(() => {
     if (debounceRef.current) clearTimeout(debounceRef.current)
 
     const trimmed = query.trim()
-    // Skip short queries — they return too many noisy results and burn
-    // Nominatim's rate limit for nothing.
     if (trimmed.length < 3) {
       setSuggestions([])
       return
@@ -85,8 +102,6 @@ export default function FieldMap({ onPick }) {
         setSuggestions(results)
         setShowSuggestions(results.length > 0)
       } catch {
-        // Silent failure on autocomplete — the search button still works
-        // for the manual path so we don't want to alarm the user.
         setSuggestions([])
       }
     }, 400)
@@ -96,7 +111,6 @@ export default function FieldMap({ onPick }) {
     }
   }, [query])
 
-  // Called when the user clicks a suggestion from the dropdown.
   const handleSuggestionClick = (place) => {
     const latitude = parseFloat(place.lat)
     const longitude = parseFloat(place.lon)
@@ -107,15 +121,12 @@ export default function FieldMap({ onPick }) {
     setMarker([latitude, longitude])
     onPick(latitude, longitude)
 
-    // Show a short, clean label in the input instead of the full address.
     setQuery(place.display_name.split(',').slice(0, 3).join(','))
     setSuggestions([])
     setShowSuggestions(false)
     setSearchError('')
   }
 
-  // Called when the user presses Enter / clicks Search. Fires a
-  // one-shot lookup and jumps to the first result.
   const handleSubmit = async (e) => {
     e.preventDefault()
     const q = query.trim()
@@ -153,7 +164,6 @@ export default function FieldMap({ onPick }) {
           Nuru will fetch the weather and recommend crops for that spot.
         </p>
 
-        {/* Search box with autocomplete dropdown */}
         <form className="map-search" onSubmit={handleSubmit}>
           <Icon name="location" size={16} />
           <input
@@ -161,7 +171,6 @@ export default function FieldMap({ onPick }) {
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             onFocus={() => suggestions.length && setShowSuggestions(true)}
-            // Delay hiding so a click on a suggestion still registers.
             onBlur={() => setTimeout(() => setShowSuggestions(false), 200)}
             placeholder="Search for a town or place…"
             aria-label="Search for a location"
@@ -177,7 +186,7 @@ export default function FieldMap({ onPick }) {
                 <li key={place.place_id}>
                   <button
                     type="button"
-                    onMouseDown={(e) => e.preventDefault()}  // stop the blur
+                    onMouseDown={(e) => e.preventDefault()}
                     onClick={() => handleSuggestionClick(place)}
                   >
                     <Icon name="location" size={13} />
