@@ -246,7 +246,6 @@ async def fetch_weather(latitude: float, longitude: float) -> dict:
     history_rain = round(sum(historic_rain) / len(historic_rain), 1) if historic_rain else 0.0
     month_name = today.strftime('%B')
 
-    # Add province so the frontend can display it and /api/crops can use it.
     province = province_from_coords(latitude, longitude)
 
     summary = (
@@ -325,14 +324,13 @@ async def gemini_answer(
                 ))
         sdk_contents.append(types.Content(role=item.get('role', 'user'), parts=sdk_parts))
 
-        # Fallback chain. Google has retired several "2.5" models for new
-    # projects (they 404 with "no longer available to new users"), so we
-    # stick to the current-generation family. If GEMINI_MODEL from .env
-    # is set to something retired, these backups still work.
+    # Fallback chain. Google has retired several "2.5" models for new
+    # projects (they 404 with "no longer available to new users"). We also
+    # exclude "lite" variants because their free-tier quota is only ~20
+    # requests/day — exhausted by a handful of demo interactions.
     models_to_try = [
-        GEMINI_MODEL,                # usually gemini-3.6-flash
-        'gemini-3.6-flash',          # primary alternative
-        'gemini-3.5-flash',          # lighter fallback
+        GEMINI_MODEL,        # from .env (should be gemini-3.6-flash)
+        'gemini-3.6-flash',  # backup
     ]
 
     max_attempts = 4
@@ -364,9 +362,20 @@ async def gemini_answer(
                     continue
                 break
 
+    # Friendly messages based on the actual failure.
+    if last_error and '429' in last_error:
+        raise HTTPException(
+            status_code=503,
+            detail='The AI has reached its free-tier limit for today. Please try again tomorrow.',
+        )
+    if last_error and '503' in last_error:
+        raise HTTPException(
+            status_code=503,
+            detail='The AI is temporarily overloaded. Please try again in a moment.',
+        )
     raise HTTPException(
         status_code=502,
-        detail=f'The AI service is temporarily overloaded. Last error: {last_error}',
+        detail='The AI service could not complete the request. Please try again.',
     )
 
 
@@ -570,15 +579,12 @@ async def get_crop_recommendations(lat: float, lon: float):
 
     province = province_from_coords(lat, lon)
 
-    # 1. Query by province when we know it — otherwise, get everything.
     if province:
         response = supabase.table("crop_reference").select("*").eq("province", province).execute()
     else:
         response = supabase.table("crop_reference").select("*").execute()
     candidates = response.data or []
 
-    # 2. Pull weather for the location — if it fails, return the province
-    #    list unfiltered rather than nothing.
     try:
         weather = await fetch_weather(lat, lon)
         current_temp = weather["weather"]["temperature"]
@@ -586,7 +592,6 @@ async def get_crop_recommendations(lat: float, lon: float):
         print(f"[/api/crops] weather lookup failed, returning province crops: {error}", flush=True)
         return {"status": "success", "province": province, "crops": candidates, "filtered": False}
 
-    # 3. Determine current Southern Hemisphere season from the month.
     month = date.today().month
     if month in (12, 1, 2):
         current_season = 'Summer'
@@ -613,7 +618,6 @@ async def get_crop_recommendations(lat: float, lon: float):
 
         return temp_ok and season_ok
 
-    # 4. Filter and dedupe by name (DB has historical duplicates).
     seen_names = set()
     matching = []
     for crop in candidates:
@@ -625,7 +629,6 @@ async def get_crop_recommendations(lat: float, lon: float):
         seen_names.add(name)
         matching.append(crop)
 
-    # 5. If filtering produced nothing, return the unfiltered province list.
     if not matching:
         return {"status": "success", "province": province, "crops": candidates, "filtered": False}
 
@@ -656,7 +659,6 @@ async def get_market_snapshot(lat: float, lon: float):
 
     province = province_from_coords(lat, lon)
 
-    # Map province → closest market in our dataset.
     province_market = {
         'Western Cape':   'Cape Town Market',
         'KwaZulu-Natal':  'Durban Market',
@@ -677,7 +679,6 @@ async def get_market_snapshot(lat: float, lon: float):
         if rows:
             return {"status": "success", "province": province, "market_location": target_market, "market": rows}
 
-    # Fallback — return every market so the user still sees data.
     response = supabase.table("market_reference").select("*").execute()
     return {
         "status": "success",
