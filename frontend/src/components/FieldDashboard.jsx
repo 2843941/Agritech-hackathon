@@ -1,8 +1,11 @@
 import Icon from './Icon';
+import { CardSkeleton } from './Skeleton';
 
 export default function FieldDashboard({
   fieldProfile, weather, locationStatus, locationLoading, onUseMyLocation,
 }) {
+  const showSkeleton = locationLoading && !fieldProfile;
+
   return (
     <section className="dashboard-section" id="field">
       <div className="container section-intro">
@@ -18,23 +21,29 @@ export default function FieldDashboard({
             <span><Icon name="location" size={18} /> FIELD PROFILE</span>
             {fieldProfile && <span className="live-badge"><i /> LIVE</span>}
           </div>
-          <h3>{fieldProfile ? fieldProfile.location.label : 'Connect your location'}</h3>
-          <p className="card-description">
-            {fieldProfile ? fieldProfile.summary : 'We use your approximate coordinates to retrieve a live weather and seasonal context. You choose when to share it.'}
-          </p>
-          <button className="button button-dark" onClick={onUseMyLocation} disabled={locationLoading}>
-            {locationLoading ? 'Reading your field…' : <><Icon name="location" size={18} /> Use my location</>}
-          </button>
-          {locationStatus && (
-            <p className={`location-status ${fieldProfile ? 'success' : ''}`}>
-              {fieldProfile && <Icon name="check" size={16} />}{locationStatus}
-            </p>
-          )}
-          {fieldProfile && (
-            <div className="season-strip">
-              <div><span>SEASONAL SIGNAL</span><strong>{fieldProfile.history.period}</strong></div>
-              <p>{fieldProfile.history.note}</p>
-            </div>
+          {showSkeleton ? (
+            <CardSkeleton />
+          ) : (
+            <>
+              <h3>{fieldProfile ? fieldProfile.location.label : 'Connect your location'}</h3>
+              <p className="card-description">
+                {fieldProfile ? fieldProfile.summary : 'We use your approximate coordinates to retrieve a live weather and seasonal context. You choose when to share it.'}
+              </p>
+              <button className="button button-dark" onClick={onUseMyLocation} disabled={locationLoading}>
+                {locationLoading ? 'Reading your field…' : <><Icon name="location" size={18} /> Use my location</>}
+              </button>
+              {locationStatus && (
+                <p className={`location-status ${fieldProfile ? 'success' : ''}`}>
+                  {fieldProfile && <Icon name="check" size={16} />}{locationStatus}
+                </p>
+              )}
+              {fieldProfile && (
+                <div className="season-strip">
+                  <div><span>SEASONAL SIGNAL</span><strong>{fieldProfile.history.period}</strong></div>
+                  <p>{fieldProfile.history.note}</p>
+                </div>
+              )}
+            </>
           )}
         </div>
         <div className="weather-card card">

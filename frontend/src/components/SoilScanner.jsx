@@ -1,6 +1,7 @@
 import { useRef } from 'react';
 import ReactMarkdown from 'react-markdown';
 import Icon from './Icon';
+import { CardSkeleton } from './Skeleton';
 
 export default function SoilScanner({
   scanFile, scanPreview, scanResult, scanLoading, scanError,
@@ -53,7 +54,18 @@ export default function SoilScanner({
               </button>
             </div>
           )}
-          {scanError && <p className="form-error">{scanError}</p>}
+          {scanLoading && !scanResult && (
+            <div className="scan-result">
+              <div><span>AI SOIL OBSERVATION</span><Icon name="spark" size={18} /></div>
+              <CardSkeleton />
+            </div>
+          )}
+          {scanError && (
+            <div className="card-error">
+              <strong>Error:</strong>
+              <span>{scanError}</span>
+            </div>
+          )}
           {scanResult && (
             <div className="scan-result">
               <div><span>AI SOIL OBSERVATION</span><Icon name="spark" size={18} /></div>

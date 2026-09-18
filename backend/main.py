@@ -117,6 +117,14 @@ class ChatRequest(BaseModel):
     fieldContext: str = Field(default='', max_length=2500)
 
 
+class FieldProfileSaveRequest(BaseModel):
+    label: str
+    latitude: float
+    longitude: float
+    summary: str = ""
+    notes: str = ""
+
+
 def mean(values: list[float | int | None]) -> float:
     usable = [float(value) for value in values if value is not None]
     return round(sum(usable) / len(usable), 1) if usable else 0.0
@@ -326,12 +334,23 @@ async def field_profile(coordinates: Coordinates) -> dict:
     return await fetch_weather(coordinates.latitude, coordinates.longitude)
 
 
+@app.get("/api/soil-scans")
+async def get_soil_scans(user=Depends(get_current_user)):
+    supabase = get_supabase()
+    response = supabase.table("soil_scans").select("*").eq("user_id", user.id).order("created_at", desc=True).execute()
+    return response.data
+
+
 @app.post('/api/soil-analysis')
-async def soil_analysis(request: SoilRequest) -> dict:
+async def soil_analysis(request: SoilRequest, user=Depends(get_current_user)) -> dict:
     try:
-        base64.b64decode(request.image, validate=True)
-    except ValueError as error:
+        raw_image = request.image or ''
+        if ',' in raw_image:
+            raw_image = raw_image.split(',', 1)[1]
+        image_bytes = base64.b64decode(raw_image, validate=False)
+    except (TypeError, ValueError) as error:
         raise HTTPException(status_code=422, detail='That photo could not be read. Please take a new JPG or PNG photo.') from error
+
     prompt = f"""You are Nuru, an expert agricultural soil advisor. Analyze this soil photo and provide a concise visual assessment. Do not write lengthy disclaimers; jump straight into the insights.
 
 Location: {request.location}
@@ -344,10 +363,24 @@ Format the output concisely using exactly these markdown bullet points:
 
 Only describe what can be visually supported by the image. Do not claim exact pH, nutrient levels, salinity, contamination, or a definitive diagnosis."""
     answer = await gemini_answer(
-        [{'role': 'user', 'parts': [{'text': prompt}, {'inlineData': {'mimeType': request.mimeType, 'data': request.image}}]}],
+        [{'role': 'user', 'parts': [{'text': prompt}, {'inlineData': {'mimeType': request.mimeType, 'data': base64.b64encode(image_bytes).decode('ascii')}}]}],
         temperature=0.4,
         max_output_tokens=1000,
     )
+
+    supabase = get_supabase()
+    try:
+        db_response = supabase.table("soil_scans").insert({
+            "user_id": user.id,
+            "location": request.location,
+            "analysis_result": answer,
+            "image_url": None,
+        }).execute()
+        print('Supabase Insert Response:', db_response)
+    except Exception as exc:
+        print('Error in analyze_soil:', str(exc))
+        raise HTTPException(status_code=500, detail=f'Soil vision analysis succeeded, but the database save failed: {str(exc)}') from exc
+
     return {'answer': answer}
 
 
@@ -359,6 +392,60 @@ async def farm_chat(request: ChatRequest) -> dict:
         contents.append({'role': 'model' if message.role == 'assistant' else 'user', 'parts': [{'text': message.text}]})
     contents.append({'role': 'user', 'parts': [{'text': f'{context}\n\nFarmer question: {request.message}'}]})
     return {'answer': await gemini_answer(contents)}
+
+
+@app.get("/api/saved-fields")
+async def get_saved_fields(user=Depends(get_current_user)):
+    supabase = get_supabase()
+    response = supabase.table("field_profiles").select("*").eq("user_id", user.id).order("created_at", desc=True).execute()
+    return response.data
+
+
+@app.post("/api/save-field")
+async def save_field_profile(data: FieldProfileSaveRequest, user=Depends(get_current_user)):
+    supabase = get_supabase()
+
+    payload_variants = [
+        {
+            "user_id": user.id,
+            "field_name": data.label,
+            "location_point": {
+                "type": "Point",
+                "coordinates": [data.longitude, data.latitude],
+            },
+            "summary": data.summary,
+            "notes": data.notes,
+        },
+        {
+            "user_id": user.id,
+            "field_name": data.label,
+            "latitude": data.latitude,
+            "longitude": data.longitude,
+            "summary": data.summary,
+            "notes": data.notes,
+        },
+        {
+            "user_id": user.id,
+            "label": data.label,
+            "latitude": data.latitude,
+            "longitude": data.longitude,
+            "summary": data.summary,
+            "notes": data.notes,
+        },
+    ]
+
+    last_error = None
+    for payload in payload_variants:
+        try:
+            response = supabase.table("field_profiles").insert(payload).execute()
+            return response.data
+        except Exception as exc:
+            last_error = exc
+
+    raise HTTPException(
+        status_code=400,
+        detail=f"Could not save this field profile to the database. Expected columns do not match the current field_profiles table. Last error: {last_error}",
+    )
 
 
 # --- DATASET & USER ENDPOINTS (SUPABASE) ---
