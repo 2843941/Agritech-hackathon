@@ -325,7 +325,15 @@ async def gemini_answer(
                 ))
         sdk_contents.append(types.Content(role=item.get('role', 'user'), parts=sdk_parts))
 
-    models_to_try = [GEMINI_MODEL, 'gemini-3.5-flash', 'gemini-2.5-flash-lite']
+        # Fallback chain. Google has retired several "2.5" models for new
+    # projects (they 404 with "no longer available to new users"), so we
+    # stick to the current-generation family. If GEMINI_MODEL from .env
+    # is set to something retired, these backups still work.
+    models_to_try = [
+        GEMINI_MODEL,                # usually gemini-3.6-flash
+        'gemini-3.6-flash',          # primary alternative
+        'gemini-3.5-flash',          # lighter fallback
+    ]
 
     max_attempts = 4
     last_error = None
