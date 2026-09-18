@@ -459,3 +459,117 @@
   /* Inner components may have their own top margin — collapse it. */
   padding: 0;
 }
+
+/* --- Map search box ------------------------------------------------------ */
+.map-search {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0.75rem 0;
+  padding: 0.5rem 0.75rem;
+  background: var(--cream);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+
+.map-search svg {
+  color: var(--muted);
+  flex-shrink: 0;
+}
+
+.map-search input {
+  flex: 1;
+  border: none;
+  background: transparent;
+  font-size: 0.95rem;
+  color: var(--ink);
+  outline: none;
+  font-family: inherit;
+}
+
+.map-search input::placeholder {
+  color: var(--muted);
+}
+
+.map-search button {
+  background: var(--moss);
+  color: var(--cream);
+  border: none;
+  border-radius: 8px;
+  padding: 0.45rem 0.9rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.map-search button:hover:not(:disabled) {
+  background: var(--leaf);
+}
+
+.map-search button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.map-search-error {
+  color: #721c24;
+  background: #f8d7da;
+  padding: 0.5rem 0.75rem;
+  border-radius: 8px;
+  font-size: 0.85rem;
+  margin: 0 0 0.75rem;
+}
+
+/* --- Map search autocomplete dropdown ---------------------------------- */
+.map-search {
+  position: relative;  /* anchor for the absolutely-positioned dropdown */
+}
+
+.map-suggestions {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  z-index: 1000;
+  list-style: none;
+  padding: 0.35rem 0;
+  margin: 0.35rem 0 0;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08);
+  max-height: 260px;
+  overflow-y: auto;
+}
+
+.map-suggestions li {
+  margin: 0;
+  padding: 0;
+}
+
+.map-suggestions button {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.55rem;
+  width: 100%;
+  padding: 0.6rem 0.85rem;
+  background: transparent;
+  border: none;
+  text-align: left;
+  font-size: 0.85rem;
+  color: var(--ink);
+  cursor: pointer;
+  font-family: inherit;
+  line-height: 1.35;
+}
+
+.map-suggestions button svg {
+  color: var(--leaf);
+  flex-shrink: 0;
+  margin-top: 0.15rem;
+}
+
+.map-suggestions button:hover {
+  background: var(--mist);
+}
