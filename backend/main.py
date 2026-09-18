@@ -47,7 +47,6 @@ app.add_middleware(
 
 GEMINI_MODEL = os.getenv('GEMINI_MODEL', 'gemini-2.5-flash')
 
-# WeatherAPI.com setup
 WEATHERAPI_KEY = os.getenv('WEATHERAPI_KEY', '')
 WEATHERAPI_BASE = 'https://api.weatherapi.com/v1'
 
@@ -90,12 +89,6 @@ async def get_current_user(authorization: str = Header(None)):
 
 
 # --- Province lookup --------------------------------------------------------
-# Approximate bounding boxes for South Africa's 9 provinces. Order matters —
-# we check in order and return the first match, so overlap regions resolve
-# to whichever province is checked first. Good enough for crop filtering;
-# not accurate enough for legal boundaries.
-#
-# Boxes are (min_lat, max_lat, min_lon, max_lon).
 _PROVINCE_BOXES = [
     ('Western Cape',   -35.0, -30.0, 17.5, 24.5),
     ('Northern Cape',  -31.5, -25.5, 17.5, 25.5),
@@ -110,11 +103,7 @@ _PROVINCE_BOXES = [
 
 
 def province_from_coords(lat: float, lon: float) -> str | None:
-    """Return the SA province containing (lat, lon), or None if outside SA.
-
-    Uses bounding boxes, not exact boundaries. Order in _PROVINCE_BOXES
-    determines which wins for overlapping regions.
-    """
+    """Return the SA province containing (lat, lon), or None if outside SA."""
     for name, min_lat, max_lat, min_lon, max_lon in _PROVINCE_BOXES:
         if min_lat <= lat <= max_lat and min_lon <= lon <= max_lon:
             return name
@@ -324,13 +313,11 @@ async def gemini_answer(
                 ))
         sdk_contents.append(types.Content(role=item.get('role', 'user'), parts=sdk_parts))
 
-    # Fallback chain. Google has retired several "2.5" models for new
-    # projects (they 404 with "no longer available to new users"). We also
-    # exclude "lite" variants because their free-tier quota is only ~20
-    # requests/day — exhausted by a handful of demo interactions.
+    # Fallback chain. Google retired the 2.5 models for new projects, and
+    # the "lite" variants have tiny free-tier quotas, so we stick to 3.x flash.
     models_to_try = [
-        GEMINI_MODEL,        # from .env (should be gemini-3.6-flash)
-        'gemini-3.6-flash',  # backup
+        GEMINI_MODEL,
+        'gemini-3.6-flash',
     ]
 
     max_attempts = 4
@@ -362,7 +349,6 @@ async def gemini_answer(
                     continue
                 break
 
-    # Friendly messages based on the actual failure.
     if last_error and '429' in last_error:
         raise HTTPException(
             status_code=503,
@@ -404,6 +390,13 @@ async def get_soil_scans(user=Depends(get_current_user)):
 
 @app.post('/api/soil-analysis')
 async def soil_analysis(request: SoilRequest, user=Depends(get_current_user)) -> dict:
+    """General field-photo analysis.
+
+    Accepts any agricultural photo (soil, leaves, fruit, whole plant, pest)
+    and asks the model to identify what it sees before giving advice.
+    Endpoint name kept as /api/soil-analysis for backward compatibility
+    with the existing frontend — it handles more than soil now.
+    """
     try:
         raw_image = request.image or ''
         if ',' in raw_image:
@@ -412,17 +405,25 @@ async def soil_analysis(request: SoilRequest, user=Depends(get_current_user)) ->
     except (TypeError, ValueError) as error:
         raise HTTPException(status_code=422, detail='That photo could not be read. Please take a new JPG or PNG photo.') from error
 
-    prompt = f"""You are Nuru, an expert agricultural soil advisor. Analyze this soil photo and provide a concise visual assessment. Do not write lengthy disclaimers; jump straight into the insights.
+    prompt = f"""You are Nuru, an agricultural field adviser. Analyze this photo from a farmer and respond helpfully. The photo may show soil, plant leaves, fruit, a whole plant, or a pest.
 
 Location: {request.location}
-Weather Context: {request.weatherContext or 'not provided'}
+Weather context: {request.weatherContext or 'not provided'}
 
-Format the output concisely using exactly these markdown bullet points:
-* **Soil Texture**: Observation on the sand, clay, and loam balance.
-* **Moisture & Organic Matter**: Darkness, moisture, drainage, and organic matter indicators.
-* **Recommended Action**: One practical step for planting preparation.
+Begin your answer with one short line naming what the photo primarily shows, in this exact format:
+**Subject:** soil | plant leaves | fruit | whole plant | pest | unclear
 
-Only describe what can be visually supported by the image. Do not claim exact pH, nutrient levels, salinity, contamination, or a definitive diagnosis."""
+Then give three markdown bullet points adapted to that subject:
+* **What I can see**: only visual details actually present in the photo (colour, texture, lesions, damage, growth stage, moisture, insects, mould). Do not invent anything.
+* **What it might mean**: possible causes or conditions — labelled as possibilities, not diagnoses.
+* **Recommended action**: one practical next step for the farmer.
+
+Rules:
+- If the photo is unclear or does not show anything agricultural, say so plainly and suggest a clearer, well-lit close-up.
+- Never invent a crop species, disease name, exact nutrient value, or chemical treatment.
+- If symptoms suggest something serious, recommend a local extension officer.
+- Keep the whole answer under 160 words."""
+
     answer = await gemini_answer(
         [{'role': 'user', 'parts': [{'text': prompt}, {'inlineData': {'mimeType': request.mimeType, 'data': base64.b64encode(image_bytes).decode('ascii')}}]}],
         temperature=0.4,
@@ -440,7 +441,7 @@ Only describe what can be visually supported by the image. Do not claim exact pH
         print('Supabase Insert Response:', db_response)
     except Exception as exc:
         print('Error in analyze_soil:', str(exc))
-        raise HTTPException(status_code=500, detail=f'Soil vision analysis succeeded, but the database save failed: {str(exc)}') from exc
+        raise HTTPException(status_code=500, detail=f'Vision analysis succeeded, but the database save failed: {str(exc)}') from exc
 
     return {'answer': answer}
 
@@ -569,11 +570,6 @@ async def get_crop_recommendations(lat: float, lon: float):
       1. Look up the province from (lat, lon) using bounding boxes.
       2. Query crop_reference rows for that province only.
       3. Narrow further by live temperature and current season.
-
-    This gives Cape Town a Western Cape list (wheat, grapes, olives),
-    Johannesburg a Gauteng list (maize, sorghum, spinach), and so on.
-    Falls back to a national list if the province can't be determined
-    (point outside South Africa or in a gap between boxes).
     """
     supabase = get_supabase()
 
@@ -637,24 +633,7 @@ async def get_crop_recommendations(lat: float, lon: float):
 
 @app.get("/api/market-snapshot")
 async def get_market_snapshot(lat: float, lon: float):
-    """Return market price benchmarks for the province of (lat, lon).
-
-    Mapping from province to market_location (approximate — each province
-    is served by one main fresh-produce market in our dataset):
-      Western Cape   -> Cape Town Market
-      KwaZulu-Natal  -> Durban Market
-      Free State     -> Bloemfontein Market
-      Limpopo        -> Polokwane Market
-      Mpumalanga     -> Mbombela Market
-      Northern Cape  -> Kimberley Market
-      North West     -> Mahikeng Market
-      Eastern Cape   -> Mthatha Market
-      Gauteng        -> Johannesburg Market (Tshwane is also Gauteng)
-
-    If the province can't be determined, returns all markets. If the
-    province has no rows in the dataset, also returns all markets
-    rather than an empty list.
-    """
+    """Return market price benchmarks for the province of (lat, lon)."""
     supabase = get_supabase()
 
     province = province_from_coords(lat, lon)
