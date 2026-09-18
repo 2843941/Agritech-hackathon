@@ -8,6 +8,7 @@ import FieldMap from '../components/FieldMap'
 import CropRecommendations from '../components/CropRecommendations'
 import MarketSnapshot from '../components/MarketSnapshot'
 import WateringReminders from '../components/WateringReminders'
+import { PlantManager } from '../components/PlantManager'
 
 export default function FieldPage({
   fieldProfile,
@@ -16,6 +17,8 @@ export default function FieldPage({
   locationLoading,
   onUseMyLocation,
   onMapPick,
+  authToken,
+  apiBaseUrl,
 }) {
   return (
     <main>
@@ -30,6 +33,9 @@ export default function FieldPage({
       <CropRecommendations fieldProfile={fieldProfile} />
       <MarketSnapshot fieldProfile={fieldProfile} />
       <WateringReminders />
+      <div className="container" style={{ marginTop: '2rem' }}>
+        <PlantManager authToken={authToken} apiBaseUrl={apiBaseUrl} />
+      </div>
     </main>
   )
 }

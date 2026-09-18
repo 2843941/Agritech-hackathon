@@ -1,10 +1,3 @@
-// App — the router shell. Holds shared state and dispatches to pages.
-//
-// State stays here (not in each page) because FieldPage and ScanPage
-// both need pieces of it: fieldProfile drives the map + crops + market,
-// scanFile drives the soil scanner, and messages drive the chat.
-// Passing props keeps it simple for the hackathon — no Context needed.
-
 import { useState, useEffect } from 'react'
 import { Routes, Route, Navigate } from 'react-router-dom'
 import './App.css'
@@ -28,9 +21,6 @@ const defaultWeather = {
 }
 
 export default function App() {
-  // --- Session ---------------------------------------------------------
-  // Three states: undefined (still checking), null (signed out), or the
-  // session object (signed in).
   const [session, setSession] = useState(undefined)
 
   useEffect(() => {
@@ -46,20 +36,17 @@ export default function App() {
     setSession(null)
   }
 
-  // --- Field / weather -------------------------------------------------
   const [weather, setWeather] = useState(defaultWeather)
   const [fieldProfile, setFieldProfile] = useState(null)
   const [locationStatus, setLocationStatus] = useState('')
   const [locationLoading, setLocationLoading] = useState(false)
 
-  // --- Soil scan -------------------------------------------------------
   const [scanFile, setScanFile] = useState(null)
   const [scanPreview, setScanPreview] = useState('')
   const [scanResult, setScanResult] = useState('')
   const [scanLoading, setScanLoading] = useState(false)
   const [scanError, setScanError] = useState('')
 
-  // --- Chat ------------------------------------------------------------
   const [messages, setMessages] = useState([
     { role: 'assistant', text: 'Hello, I am Nuru. I can help you plan, observe and respond to the conditions in your field. What are you growing?' },
   ])
@@ -67,10 +54,7 @@ export default function App() {
   const [chatLoading, setChatLoading] = useState(false)
   const [chatError, setChatError] = useState('')
 
-  // --- API helper ------------------------------------------------------
   const requestJson = async (path, options) => {
-    // Attach the current session's access token so the backend can
-    // identify the user for protected endpoints.
     const token = session?.access_token
     const headers = { 'Content-Type': 'application/json' }
     if (token) headers.Authorization = `Bearer ${token}`
@@ -81,7 +65,6 @@ export default function App() {
     return body
   }
 
-  // --- Field actions ---------------------------------------------------
   const loadFieldProfile = async (latitude, longitude) => {
     setLocationLoading(true)
     setLocationStatus('Building your local field profile…')
@@ -92,8 +75,11 @@ export default function App() {
       setFieldProfile(profile)
       setWeather(profile.weather)
       setLocationStatus(`Field profile ready for ${profile.location.label}.`)
-    } catch (error) { setLocationStatus(error.message) }
-    finally { setLocationLoading(false) }
+    } catch (error) {
+      setLocationStatus(error.message)
+    } finally {
+      setLocationLoading(false)
+    }
   }
 
   const useMyLocation = () => {
@@ -113,7 +99,6 @@ export default function App() {
     )
   }
 
-  // --- Soil actions ----------------------------------------------------
   const selectFile = (file) => {
     setScanError(''); setScanResult('')
     if (!file) return
@@ -152,13 +137,17 @@ export default function App() {
 
   const removeScan = () => { setScanPreview(''); setScanFile(null); setScanResult('') }
 
-  // --- Chat actions ----------------------------------------------------
   const sendMessage = async (event, presetQuestion) => {
     event?.preventDefault()
     const text = (presetQuestion || messageInput).trim()
     if (!text || chatLoading) return
+
     const updated = [...messages, { role: 'user', text }]
-    setMessages(updated); setMessageInput(''); setChatLoading(true); setChatError('')
+    setMessages(updated)
+    setMessageInput('')
+    setChatLoading(true)
+    setChatError('')
+
     try {
       const result = await requestJson('/api/farm-chat', {
         method: 'POST',
@@ -172,12 +161,11 @@ export default function App() {
     } catch (error) {
       setChatError(error.message)
       setMessages((current) => current.slice(0, -1))
-    } finally { setChatLoading(false) }
+    } finally {
+      setChatLoading(false)
+    }
   }
 
-  // --- Session gate ----------------------------------------------------
-  // Wait for the initial session check to complete before rendering
-  // anything, to avoid flashing the login screen at returning users.
   if (session === undefined) {
     return <main className="auth-shell"><p>Loading…</p></main>
   }
@@ -186,10 +174,8 @@ export default function App() {
 
   return (
     <Routes>
-      {/* Public home — always visible */}
       <Route path="/" element={<HomePage />} />
 
-      {/* Authed: field dashboard + map + crops + market + watering */}
       <Route
         path="/field"
         element={isAuthed ? (
@@ -202,12 +188,13 @@ export default function App() {
               locationLoading={locationLoading}
               onUseMyLocation={useMyLocation}
               onMapPick={loadFieldProfile}
+              authToken={session?.access_token}
+              apiBaseUrl={API_BASE_URL}
             />
           </>
         ) : <Navigate to="/login" replace />}
       />
 
-      {/* Authed: soil scanner + adviser chat, combined on one page */}
       <Route
         path="/scan"
         element={isAuthed ? (
@@ -234,18 +221,15 @@ export default function App() {
         ) : <Navigate to="/login" replace />}
       />
 
-      {/* Login */}
       <Route
         path="/login"
         element={isAuthed ? <Navigate to="/field" replace /> : (
           <AuthModal onAuthenticated={() => {
-            // AuthModal receives the access token but we don't need it here —
-            // the onAuthStateChange listener picks up the new session.
+            // The auth state listener updates session automatically.
           }} />
         )}
       />
 
-      {/* Fallback */}
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   )
