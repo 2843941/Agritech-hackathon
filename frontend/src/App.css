@@ -361,3 +361,52 @@
   .app-nav-links { gap: 1rem; margin-right: 0.75rem; }
   .app-nav-link { font-size: 0.8rem; }
 }
+
+/* --- Soil/pest scan result: bump font size + readability ----------------- */
+/* The AI response was rendering at ~0.9rem which read as cramped. Bump to
+   body-text size (1rem), increase line-height, and give the markdown
+   children proper spacing so headings/lists/paragraphs breathe. */
+
+.scan-result-content {
+  font-size: 1rem;
+  line-height: 1.65;
+  color: var(--ink);
+}
+
+.scan-result-content p {
+  margin: 0 0 0.75rem;
+}
+
+.scan-result-content p:last-child {
+  margin-bottom: 0;
+}
+
+.scan-result-content ul,
+.scan-result-content ol {
+  margin: 0.5rem 0 0.9rem;
+  padding-left: 1.25rem;
+}
+
+.scan-result-content li {
+  margin-bottom: 0.4rem;
+}
+
+.scan-result-content strong {
+  color: var(--ink);
+  font-weight: 700;
+}
+
+.scan-result-content h1,
+.scan-result-content h2,
+.scan-result-content h3 {
+  font-size: 1.05rem;
+  margin: 1rem 0 0.5rem;
+  color: var(--ink);
+}
+
+.scan-result-content code {
+  font-size: 0.95em;
+  background: var(--mist);
+  padding: 0.1rem 0.35rem;
+  border-radius: 4px;
+}
