@@ -5,11 +5,11 @@
 //   - On mount and whenever lat/lon changes, calls the backend's
 //     /api/crops endpoint with those coordinates.
 //   - Backend determines province + current season and returns matching crops.
-//   - Renders them as a card with each crop's name and a one-line note.
+//   - Renders them as a card with each crop's name and a one-line detail.
 //
-// If the backend endpoint doesn't exist yet (Track A's job), the fetch
-// fails silently and we render nothing. That way this component can be
-// built and demoed before Andile's backend work lands.
+// Backend shape note: the endpoint returns { status: "success", crops: [...] }.
+// It also currently returns each crop twice (data-side bug, tracked separately),
+// so we dedupe on the client until that's fixed.
 
 import { useEffect, useState } from 'react'
 import Icon from './Icon'
@@ -41,10 +41,27 @@ export default function CropRecommendations({ fieldProfile }) {
         const res = await fetch(`${API_BASE_URL}/api/crops?lat=${lat}&lon=${lon}`)
         if (!res.ok) throw new Error('Crop recommendations are not available yet.')
         const data = await res.json()
-        if (!cancelled) setCrops(Array.isArray(data) ? data : [])
+
+        // Handle both response shapes:
+        //   - { status: 'success', crops: [...] }  (current backend)
+        //   - [...]                                (older/simpler shape)
+        const list = Array.isArray(data) ? data : (data?.crops ?? [])
+
+        // Deduplicate by crop name. The backend currently returns each
+        // crop twice (duplicate seed rows). This is a client-side band-aid
+        // until the DB is cleaned up.
+        const seen = new Set()
+        const unique = list.filter((c) => {
+          const key = c.name || c.crop
+          if (seen.has(key)) return false
+          seen.add(key)
+          return true
+        })
+
+        if (!cancelled) setCrops(unique)
       } catch (err) {
         // Silently ignore "endpoint doesn't exist" errors so this component
-        // stays visible-but-quiet until Andile's backend work lands.
+        // stays visible-but-quiet if the backend is down.
         if (!cancelled) {
           setCrops([])
           setError('')
@@ -84,9 +101,13 @@ export default function CropRecommendations({ fieldProfile }) {
         {crops.length > 0 && (
           <ul className="crop-list">
             {crops.map((crop) => (
-              <li key={crop.name || crop.crop}>
-                <strong>{crop.name || crop.crop}</strong>
-                {crop.notes && <span>{crop.notes}</span>}
+              <li key={crop.id || crop.name}>
+                <strong>{crop.name}</strong>
+                <span>
+                  {crop.category}
+                  {crop.growing_season && ` · ${crop.growing_season}`}
+                  {crop.optimal_soil_ph != null && ` · pH ${crop.optimal_soil_ph}`}
+                </span>
               </li>
             ))}
           </ul>

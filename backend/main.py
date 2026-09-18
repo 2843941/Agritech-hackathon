@@ -451,11 +451,94 @@ async def save_field_profile(data: FieldProfileSaveRequest, user=Depends(get_cur
 # --- DATASET & USER ENDPOINTS (SUPABASE) ---
 
 @app.get("/api/crops")
-def get_crop_recommendations():
-    """Fetch reference crops for recommendations"""
+async def get_crop_recommendations(lat: float, lon: float):
+    """Return crops suited to the climate at the given coordinates.
+
+    Filtering logic:
+      1. Fetch live temperature for the location from WeatherAPI.
+      2. Filter the crop_reference table by two signals we can trust:
+         temperature (live) and season (derived from the current month).
+      3. We do NOT filter on rainfall. WeatherAPI's history endpoint is
+         per-day, so our "monthly rainfall" is a rough single-day sample.
+         Crop rainfall ranges in the table are annual totals (300-800mm).
+         Comparing them directly would filter out every crop, which was
+         happening before. Better to filter on two honest signals than on
+         one broken comparison.
+
+    Also deduplicates by crop name — the crop_reference table currently
+    contains duplicate rows (double-seed), and we don't want to show the
+    same crop twice until the DB is cleaned.
+
+    Falls back to returning all crops if weather data is unavailable — a
+    full list is more useful than an error during a demo.
+    """
     supabase = get_supabase()
+
+    # 1. Get all reference crops from Supabase.
     response = supabase.table("crop_reference").select("*").execute()
-    return {"status": "success", "crops": response.data}
+    all_crops = response.data or []
+
+    # 2. Pull weather for this location. If it fails, return everything
+    #    rather than an empty list — degraded is better than broken.
+    try:
+        weather = await fetch_weather(lat, lon)
+        current_temp = weather["weather"]["temperature"]
+    except Exception as error:
+        print(f"[/api/crops] weather lookup failed, returning all crops: {error}", flush=True)
+        return {"status": "success", "crops": all_crops, "filtered": False}
+
+    # 3. Determine the current Southern Hemisphere season from the month.
+    month = date.today().month
+    if month in (12, 1, 2):
+        current_season = 'Summer'
+    elif month in (3, 4, 5):
+        current_season = 'Autumn'
+    elif month in (6, 7, 8):
+        current_season = 'Winter'
+    else:
+        current_season = 'Spring'
+
+    def crop_matches(crop: dict) -> bool:
+        # Temperature check — live data, tight range.
+        try:
+            temp_ok = crop["min_temp"] <= current_temp <= crop["max_temp"]
+        except (KeyError, TypeError):
+            temp_ok = False
+
+        # Season check — how a real South African planting calendar works:
+        #   - Spring is when Summer crops get planted (Sep-Nov).
+        #   - Autumn is when Winter crops get planted (Mar-May).
+        #   - Summer and Winter are the growing seasons themselves.
+        # "All Season" always matches.
+        season = (crop.get("growing_season") or '').strip()
+        if current_season == 'Spring':
+            season_ok = season in ('All Season', 'Summer')
+        elif current_season == 'Autumn':
+            season_ok = season in ('All Season', 'Winter')
+        else:
+            season_ok = season in ('All Season', current_season)
+
+        return temp_ok and season_ok
+
+    # 4. Filter, then dedupe by crop name. The crop_reference table has
+    #    duplicate rows right now, so we clean it up here until the DB is fixed.
+    seen_names = set()
+    matching = []
+    for crop in all_crops:
+        if not crop_matches(crop):
+            continue
+        name = crop.get("name")
+        if name in seen_names:
+            continue
+        seen_names.add(name)
+        matching.append(crop)
+
+    # 5. If nothing matched (unusual), return all crops so the user still
+    #    sees options. Better than an empty card during a demo.
+    if not matching:
+        return {"status": "success", "crops": all_crops, "filtered": False}
+
+    return {"status": "success", "crops": matching, "filtered": True}
 
 
 @app.get("/api/market-snapshot")
