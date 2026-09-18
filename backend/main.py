@@ -51,7 +51,6 @@ WEATHERAPI_KEY = os.getenv('WEATHERAPI_KEY', '')
 WEATHERAPI_BASE = 'https://api.weatherapi.com/v1'
 
 # --- Supabase Initialization (Lazy/Graceful) --------------------------------
-# Initialized on demand to allow health checks even if credentials aren't set yet.
 _supabase_client: Client | None = None
 
 
@@ -69,7 +68,6 @@ def get_supabase() -> Client:
     return _supabase_client
 
 
-# JWT Auth Dependency for Protected User Routes
 async def get_current_user(authorization: str = Header(None)):
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Missing or invalid authorization header")
@@ -88,6 +86,38 @@ async def get_current_user(authorization: str = Header(None)):
         raise
     except Exception as e:
         raise HTTPException(status_code=401, detail=f"Authentication failed: {str(e)}")
+
+
+# --- Province lookup --------------------------------------------------------
+# Approximate bounding boxes for South Africa's 9 provinces. Order matters —
+# we check in order and return the first match, so overlap regions resolve
+# to whichever province is checked first. Good enough for crop filtering;
+# not accurate enough for legal boundaries.
+#
+# Boxes are (min_lat, max_lat, min_lon, max_lon).
+_PROVINCE_BOXES = [
+    ('Western Cape',   -35.0, -30.0, 17.5, 24.5),
+    ('Northern Cape',  -31.5, -25.5, 17.5, 25.5),
+    ('Eastern Cape',   -34.5, -30.0, 24.5, 30.0),
+    ('KwaZulu-Natal',  -31.5, -26.5, 28.5, 33.5),
+    ('Free State',     -30.8, -26.5, 24.5, 28.5),
+    ('North West',     -27.5, -24.5, 22.5, 27.5),
+    ('Gauteng',        -26.9, -25.3, 27.3, 29.0),
+    ('Mpumalanga',     -27.0, -24.5, 28.5, 32.0),
+    ('Limpopo',        -25.5, -22.0, 26.0, 32.0),
+]
+
+
+def province_from_coords(lat: float, lon: float) -> str | None:
+    """Return the SA province containing (lat, lon), or None if outside SA.
+
+    Uses bounding boxes, not exact boundaries. Order in _PROVINCE_BOXES
+    determines which wins for overlapping regions.
+    """
+    for name, min_lat, max_lat, min_lon, max_lon in _PROVINCE_BOXES:
+        if min_lat <= lat <= max_lat and min_lon <= lon <= max_lon:
+            return name
+    return None
 
 
 FARMER_SYSTEM_PROMPT = """You are Nuru, a thoughtful agricultural field adviser for smallholder and first-time farmers, with a focus on South Africa while remaining useful globally.
@@ -207,9 +237,13 @@ async def fetch_weather(latitude: float, longitude: float) -> dict:
     history_rain = round(sum(historic_rain) / len(historic_rain), 1) if historic_rain else 0.0
     month_name = today.strftime('%B')
 
+    # Add province so the frontend can display it and /api/crops can use it.
+    province = province_from_coords(latitude, longitude)
+
     summary = (
-        f'Approximate field coordinates: {latitude:.3f}, {longitude:.3f}. '
-        f'Live conditions: {condition.lower()}, {temperature}°C, '
+        f'Approximate field coordinates: {latitude:.3f}, {longitude:.3f}'
+        + (f' ({province})' if province else '')
+        + f'. Live conditions: {condition.lower()}, {temperature}°C, '
         f'wind {wind_kph} km/h. '
         f'{month_name} seasonal signal ({start_year}–{end_year}): '
         f'average temperature {history_temp}°C and average rainfall {history_rain} mm.'
@@ -220,6 +254,7 @@ async def fetch_weather(latitude: float, longitude: float) -> dict:
             'label': location_info.get('name') or f'Your field · {latitude:.3f}, {longitude:.3f}',
             'latitude': latitude,
             'longitude': longitude,
+            'province': province,
         },
         'weather': {
             'temperature': round(temperature) if temperature is not None else '--',
@@ -452,42 +487,39 @@ async def save_field_profile(data: FieldProfileSaveRequest, user=Depends(get_cur
 
 @app.get("/api/crops")
 async def get_crop_recommendations(lat: float, lon: float):
-    """Return crops suited to the climate at the given coordinates.
+    """Return crops suited to the given coordinates.
 
-    Filtering logic:
-      1. Fetch live temperature for the location from WeatherAPI.
-      2. Filter the crop_reference table by two signals we can trust:
-         temperature (live) and season (derived from the current month).
-      3. We do NOT filter on rainfall. WeatherAPI's history endpoint is
-         per-day, so our "monthly rainfall" is a rough single-day sample.
-         Crop rainfall ranges in the table are annual totals (300-800mm).
-         Comparing them directly would filter out every crop, which was
-         happening before. Better to filter on two honest signals than on
-         one broken comparison.
+    Filtering pipeline:
+      1. Look up the province from (lat, lon) using bounding boxes.
+      2. Query crop_reference rows for that province only.
+      3. Narrow further by live temperature and current season.
 
-    Also deduplicates by crop name — the crop_reference table currently
-    contains duplicate rows (double-seed), and we don't want to show the
-    same crop twice until the DB is cleaned.
-
-    Falls back to returning all crops if weather data is unavailable — a
-    full list is more useful than an error during a demo.
+    This gives Cape Town a Western Cape list (wheat, grapes, olives),
+    Johannesburg a Gauteng list (maize, sorghum, spinach), and so on.
+    Falls back to a national list if the province can't be determined
+    (point outside South Africa or in a gap between boxes).
     """
     supabase = get_supabase()
 
-    # 1. Get all reference crops from Supabase.
-    response = supabase.table("crop_reference").select("*").execute()
-    all_crops = response.data or []
+    province = province_from_coords(lat, lon)
 
-    # 2. Pull weather for this location. If it fails, return everything
-    #    rather than an empty list — degraded is better than broken.
+    # 1. Query by province when we know it — otherwise, get everything.
+    if province:
+        response = supabase.table("crop_reference").select("*").eq("province", province).execute()
+    else:
+        response = supabase.table("crop_reference").select("*").execute()
+    candidates = response.data or []
+
+    # 2. Pull weather for the location — if it fails, return the province
+    #    list unfiltered rather than nothing.
     try:
         weather = await fetch_weather(lat, lon)
         current_temp = weather["weather"]["temperature"]
     except Exception as error:
-        print(f"[/api/crops] weather lookup failed, returning all crops: {error}", flush=True)
-        return {"status": "success", "crops": all_crops, "filtered": False}
+        print(f"[/api/crops] weather lookup failed, returning province crops: {error}", flush=True)
+        return {"status": "success", "province": province, "crops": candidates, "filtered": False}
 
-    # 3. Determine the current Southern Hemisphere season from the month.
+    # 3. Determine current Southern Hemisphere season from the month.
     month = date.today().month
     if month in (12, 1, 2):
         current_season = 'Summer'
@@ -499,17 +531,11 @@ async def get_crop_recommendations(lat: float, lon: float):
         current_season = 'Spring'
 
     def crop_matches(crop: dict) -> bool:
-        # Temperature check — live data, tight range.
         try:
             temp_ok = crop["min_temp"] <= current_temp <= crop["max_temp"]
         except (KeyError, TypeError):
             temp_ok = False
 
-        # Season check — how a real South African planting calendar works:
-        #   - Spring is when Summer crops get planted (Sep-Nov).
-        #   - Autumn is when Winter crops get planted (Mar-May).
-        #   - Summer and Winter are the growing seasons themselves.
-        # "All Season" always matches.
         season = (crop.get("growing_season") or '').strip()
         if current_season == 'Spring':
             season_ok = season in ('All Season', 'Summer')
@@ -520,11 +546,10 @@ async def get_crop_recommendations(lat: float, lon: float):
 
         return temp_ok and season_ok
 
-    # 4. Filter, then dedupe by crop name. The crop_reference table has
-    #    duplicate rows right now, so we clean it up here until the DB is fixed.
+    # 4. Filter and dedupe by name (DB has historical duplicates).
     seen_names = set()
     matching = []
-    for crop in all_crops:
+    for crop in candidates:
         if not crop_matches(crop):
             continue
         name = crop.get("name")
@@ -533,12 +558,11 @@ async def get_crop_recommendations(lat: float, lon: float):
         seen_names.add(name)
         matching.append(crop)
 
-    # 5. If nothing matched (unusual), return all crops so the user still
-    #    sees options. Better than an empty card during a demo.
+    # 5. If filtering produced nothing, return the unfiltered province list.
     if not matching:
-        return {"status": "success", "crops": all_crops, "filtered": False}
+        return {"status": "success", "province": province, "crops": candidates, "filtered": False}
 
-    return {"status": "success", "crops": matching, "filtered": True}
+    return {"status": "success", "province": province, "crops": matching, "filtered": True}
 
 
 @app.get("/api/market-snapshot")
