@@ -205,3 +205,105 @@
   background: #f8d7da;
   color: #721c24;
 }
+
+/* --- Auth status messages (error vs success) ---------------------------- */
+.auth-message.auth-error {
+  color: #721c24;
+  background: #f8d7da;
+  padding: 0.6rem 0.85rem;
+  border-radius: 8px;
+  margin-top: 0.75rem;
+  font-size: 0.85rem;
+}
+
+.auth-message.auth-success {
+  color: #155724;
+  background: #d4edda;
+  padding: 0.6rem 0.85rem;
+  border-radius: 8px;
+  margin-top: 0.75rem;
+  font-size: 0.85rem;
+}
+
+/* --- App navigation bar -------------------------------------------------- */
+.app-nav {
+  position: sticky;
+  top: 0;
+  z-index: 40;
+  background: var(--ink);
+  border-bottom: 1px solid rgba(255,255,255,0.08);
+}
+
+.app-nav-inner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 2rem;
+  padding: 0.85rem 0;
+}
+
+.app-nav-brand {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  color: var(--cream);
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-decoration: none;
+  font-size: 0.95rem;
+}
+
+.app-nav-brand .brand-sub {
+  color: var(--leaf);
+  margin-left: 0.15rem;
+  font-size: 0.7rem;
+  letter-spacing: 0.15em;
+}
+
+.app-nav-links {
+  display: flex;
+  align-items: center;
+  gap: 1.75rem;
+  margin-left: auto;
+  margin-right: 1.5rem;
+}
+
+.app-nav-link {
+  color: rgba(247, 245, 238, 0.7);
+  text-decoration: none;
+  font-size: 0.9rem;
+  padding: 0.35rem 0;
+  border-bottom: 2px solid transparent;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+.app-nav-link:hover {
+  color: var(--cream);
+}
+
+.app-nav-link.active {
+  color: var(--leaf);
+  border-bottom-color: var(--leaf);
+}
+
+.app-nav-signout {
+  background: transparent;
+  color: var(--cream);
+  border: 1px solid rgba(247, 245, 238, 0.25);
+  border-radius: 8px;
+  padding: 0.45rem 0.9rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.app-nav-signout:hover {
+  background: rgba(247, 245, 238, 0.08);
+  border-color: rgba(247, 245, 238, 0.5);
+}
+
+@media (max-width: 640px) {
+  .app-nav-links { gap: 1rem; margin-right: 0.75rem; }
+  .app-nav-link { font-size: 0.8rem; }
+}

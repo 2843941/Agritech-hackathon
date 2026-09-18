@@ -1,3 +1,14 @@
+// AuthModal — sign in / sign up for Nuru Field.
+//
+// Two problems fixed in this version:
+//   1. Old success message told users to "check your email", but the
+//      Supabase project has email confirmation disabled. That confused
+//      people. Now we just sign them in immediately on success.
+//   2. Supabase returns no error when someone signs up with an email that
+//      already exists (security-by-obscurity to prevent account enumeration).
+//      The tell is an empty `user.identities` array. We now detect that and
+//      nudge the user to sign in instead of leaving them stuck.
+
 import { useState } from 'react';
 import { supabase } from '../supabaseClient';
 import Icon from './Icon';
@@ -7,33 +18,88 @@ export default function AuthModal({ onAuthenticated }) {
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
+  const [error, setError] = useState(false);  // true when the last message was a failure
 
-  const handleSignUp = async (e) => {
-    e.preventDefault();
+  // Reset any status when the user edits the fields — avoids stale
+  // error messages that confuse them about what they're about to submit.
+  const handleEmailChange = (e) => {
+    setEmail(e.target.value);
+    if (message) { setMessage(''); setError(false); }
+  };
+  const handlePasswordChange = (e) => {
+    setPassword(e.target.value);
+    if (message) { setMessage(''); setError(false); }
+  };
+
+  const handleSignUp = async () => {
     setLoading(true);
-    const { data, error } = await supabase.auth.signUp({ email, password });
-    if (error) setMessage(error.message);
-    else {
-      setMessage('Account created! Check your email for confirmation or sign in.');
-      if (data.session) onAuthenticated(data.session.access_token);
+    setMessage('');
+    setError(false);
+    try {
+      const { data, error: signUpError } = await supabase.auth.signUp({ email, password });
+
+      if (signUpError) {
+        setMessage(signUpError.message);
+        setError(true);
+        return;
+      }
+
+      // Detect the "email already registered" case. Supabase returns a
+      // user object with `identities: []` when the address is already
+      // in use (to prevent account enumeration). We can't be 100% sure
+      // which it is, so the message nudges toward sign-in instead of
+      // asserting "already registered".
+      const identities = data?.user?.identities;
+      if (Array.isArray(identities) && identities.length === 0) {
+        setMessage('That email is already registered. Try signing in instead.');
+        setError(true);
+        return;
+      }
+
+      // If Supabase returned a session (which it does when confirmation
+      // is disabled), the user is signed in immediately.
+      if (data?.session) {
+        onAuthenticated(data.session.access_token);
+        return;
+      }
+
+      // Otherwise confirmation must be enabled — tell them to check email.
+      setMessage('Account created. Check your email to confirm, then sign in.');
+    } catch (err) {
+      // Network-level failure (e.g. cannot reach Supabase).
+      setMessage(err?.message || 'Something went wrong. Please try again.');
+      setError(true);
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   };
 
   const handleSignIn = async (e) => {
-    e.preventDefault();
+    e?.preventDefault();
     setLoading(true);
-    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
-    if (error) setMessage(error.message);
-    else {
-      setMessage('Successfully logged in!');
-      onAuthenticated(data.session.access_token);
-    }
-    setLoading(false);
-  };
+    setMessage('');
+    setError(false);
+    try {
+      const { data, error: signInError } = await supabase.auth.signInWithPassword({ email, password });
 
-  const handleSubmit = (e) => {
-    handleSignIn(e);
+      if (signInError) {
+        setMessage(signInError.message);
+        setError(true);
+        return;
+      }
+
+      if (data?.session) {
+        onAuthenticated(data.session.access_token);
+      } else {
+        setMessage('Sign-in succeeded but no session was returned. Try again.');
+        setError(true);
+      }
+    } catch (err) {
+      setMessage(err?.message || 'Something went wrong. Please try again.');
+      setError(true);
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -60,20 +126,45 @@ export default function AuthModal({ onAuthenticated }) {
           <h2>Enter your field notes.</h2>
           <p>Sign in to continue your growing journey.</p>
         </div>
-        <form className="auth-form" onSubmit={handleSubmit}>
+
+        <form className="auth-form" onSubmit={handleSignIn}>
           <label htmlFor="auth-email">Email address</label>
-          <input id="auth-email" type="email" placeholder="you@example.com" value={email} onChange={(e) => setEmail(e.target.value)} required />
+          <input
+            id="auth-email"
+            type="email"
+            placeholder="you@example.com"
+            value={email}
+            onChange={handleEmailChange}
+            autoComplete="email"
+            required
+          />
+
           <label htmlFor="auth-password">Password</label>
-          <input id="auth-password" type="password" placeholder="Enter your password" value={password} onChange={(e) => setPassword(e.target.value)} required />
+          <input
+            id="auth-password"
+            type="password"
+            placeholder="Enter your password"
+            value={password}
+            onChange={handlePasswordChange}
+            autoComplete="current-password"
+            required
+          />
+
           <button className="auth-submit button button-dark" type="submit" disabled={loading}>
-            {loading ? 'Working...' : 'Sign in'}
+            {loading ? 'Working…' : 'Sign in'}
             {!loading && <Icon name="arrow" size={17} />}
           </button>
+
           <button className="auth-signup" type="button" onClick={handleSignUp} disabled={loading}>
             New here? <strong>Create an account</strong>
           </button>
         </form>
-        {message && <p className="auth-message" role="status">{message}</p>}
+
+        {message && (
+          <p className={`auth-message ${error ? 'auth-error' : 'auth-success'}`} role="status">
+            {message}
+          </p>
+        )}
       </section>
     </div>
   );

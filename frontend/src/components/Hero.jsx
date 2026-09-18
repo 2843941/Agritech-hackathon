@@ -1,28 +1,35 @@
-import Icon from './Icon';
+// Hero — the public landing hero. Shown on / (HomePage).
+//
+// Uses React Router Link for internal navigation so clicking a CTA
+// changes the route without a full page reload.
+
+import { Link } from 'react-router-dom'
+import Icon from './Icon'
 
 export default function Hero() {
   return (
     <section className="hero-section" id="home">
       <nav className="nav container" aria-label="Main navigation">
-        <a className="brand" href="#home" aria-label="Nuru home">
+        <Link className="brand" to="/" aria-label="Nuru home">
           <span className="brand-mark"><Icon name="leaf" size={23} /></span>
           <span>NURU<span className="brand-sub">FIELD</span></span>
-        </a>
+        </Link>
         <div className="nav-links">
-          <a href="#field">Your field</a>
-          <a href="#soil">Soil scan</a>
-          <a href="#adviser">AI adviser</a>
+          <Link to="/field">Your field</Link>
+          <Link to="/scan">Soil scan</Link>
+          <Link to="/adviser">AI adviser</Link>
         </div>
-        <a className="nav-action" href="#field">Open dashboard <Icon name="arrow" size={17} /></a>
+        <Link className="nav-action" to="/field">Open dashboard <Icon name="arrow" size={17} /></Link>
       </nav>
+
       <div className="hero container">
         <div className="hero-copy">
           <div className="eyebrow"><span className="status-dot" /> Practical intelligence for every field</div>
           <h1>Grow with a clearer<br /><em>view of your land.</em></h1>
           <p className="hero-lede">Nuru Field brings local conditions, soil observations and practical farming guidance into one simple place—built with smallholder farmers in mind.</p>
           <div className="hero-actions">
-            <a className="button button-primary" href="#field">Explore your field <Icon name="arrow" size={18} /></a>
-            <a className="button button-quiet" href="#soil"><Icon name="camera" size={18} /> Scan soil</a>
+            <Link className="button button-primary" to="/field">Explore your field <Icon name="arrow" size={18} /></Link>
+            <Link className="button button-quiet" to="/scan"><Icon name="camera" size={18} /> Scan soil</Link>
           </div>
           <div className="trust-row">
             <span><Icon name="location" size={17} /> Your location stays in your control</span>
@@ -46,5 +53,5 @@ export default function Hero() {
         </div>
       </div>
     </section>
-  );
+  )
 }
