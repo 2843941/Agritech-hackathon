@@ -52,7 +52,6 @@ WEATHERAPI_KEY = os.getenv('WEATHERAPI_KEY', '')
 WEATHERAPI_BASE = 'https://api.weatherapi.com/v1'
 
 # --- Supabase Initialization (Lazy/Graceful) --------------------------------
-# Initialized on demand to allow health checks even if credentials aren't set yet.
 _supabase_client: Client | None = None
 
 
@@ -70,7 +69,6 @@ def get_supabase() -> Client:
     return _supabase_client
 
 
-# JWT Auth Dependency for Protected User Routes
 async def get_current_user(authorization: str = Header(None)):
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Missing or invalid authorization header")
@@ -89,6 +87,38 @@ async def get_current_user(authorization: str = Header(None)):
         raise
     except Exception as e:
         raise HTTPException(status_code=401, detail=f"Authentication failed: {str(e)}")
+
+
+# --- Province lookup --------------------------------------------------------
+# Approximate bounding boxes for South Africa's 9 provinces. Order matters —
+# we check in order and return the first match, so overlap regions resolve
+# to whichever province is checked first. Good enough for crop filtering;
+# not accurate enough for legal boundaries.
+#
+# Boxes are (min_lat, max_lat, min_lon, max_lon).
+_PROVINCE_BOXES = [
+    ('Western Cape',   -35.0, -30.0, 17.5, 24.5),
+    ('Northern Cape',  -31.5, -25.5, 17.5, 25.5),
+    ('Eastern Cape',   -34.5, -30.0, 24.5, 30.0),
+    ('KwaZulu-Natal',  -31.5, -26.5, 28.5, 33.5),
+    ('Free State',     -30.8, -26.5, 24.5, 28.5),
+    ('North West',     -27.5, -24.5, 22.5, 27.5),
+    ('Gauteng',        -26.9, -25.3, 27.3, 29.0),
+    ('Mpumalanga',     -27.0, -24.5, 28.5, 32.0),
+    ('Limpopo',        -25.5, -22.0, 26.0, 32.0),
+]
+
+
+def province_from_coords(lat: float, lon: float) -> str | None:
+    """Return the SA province containing (lat, lon), or None if outside SA.
+
+    Uses bounding boxes, not exact boundaries. Order in _PROVINCE_BOXES
+    determines which wins for overlapping regions.
+    """
+    for name, min_lat, max_lat, min_lon, max_lon in _PROVINCE_BOXES:
+        if min_lat <= lat <= max_lat and min_lon <= lon <= max_lon:
+            return name
+    return None
 
 
 FARMER_SYSTEM_PROMPT = """You are Nuru, a thoughtful agricultural field adviser for smallholder and first-time farmers, with a focus on South Africa while remaining useful globally.
@@ -216,9 +246,13 @@ async def fetch_weather(latitude: float, longitude: float) -> dict:
     history_rain = round(sum(historic_rain) / len(historic_rain), 1) if historic_rain else 0.0
     month_name = today.strftime('%B')
 
+    # Add province so the frontend can display it and /api/crops can use it.
+    province = province_from_coords(latitude, longitude)
+
     summary = (
-        f'Approximate field coordinates: {latitude:.3f}, {longitude:.3f}. '
-        f'Live conditions: {condition.lower()}, {temperature}°C, '
+        f'Approximate field coordinates: {latitude:.3f}, {longitude:.3f}'
+        + (f' ({province})' if province else '')
+        + f'. Live conditions: {condition.lower()}, {temperature}°C, '
         f'wind {wind_kph} km/h. '
         f'{month_name} seasonal signal ({start_year}–{end_year}): '
         f'average temperature {history_temp}°C and average rainfall {history_rain} mm.'
@@ -229,6 +263,7 @@ async def fetch_weather(latitude: float, longitude: float) -> dict:
             'label': location_info.get('name') or f'Your field · {latitude:.3f}, {longitude:.3f}',
             'latitude': latitude,
             'longitude': longitude,
+            'province': province,
         },
         'weather': {
             'temperature': round(temperature) if temperature is not None else '--',
@@ -510,19 +545,138 @@ async def save_field_profile(data: FieldProfileSaveRequest, user=Depends(get_cur
 # --- DATASET & USER ENDPOINTS (SUPABASE) ---
 
 @app.get("/api/crops")
-def get_crop_recommendations():
-    """Fetch reference crops for recommendations"""
+async def get_crop_recommendations(lat: float, lon: float):
+    """Return crops suited to the given coordinates.
+
+    Filtering pipeline:
+      1. Look up the province from (lat, lon) using bounding boxes.
+      2. Query crop_reference rows for that province only.
+      3. Narrow further by live temperature and current season.
+
+    This gives Cape Town a Western Cape list (wheat, grapes, olives),
+    Johannesburg a Gauteng list (maize, sorghum, spinach), and so on.
+    Falls back to a national list if the province can't be determined
+    (point outside South Africa or in a gap between boxes).
+    """
     supabase = get_supabase()
-    response = supabase.table("crop_reference").select("*").execute()
-    return {"status": "success", "crops": response.data}
+
+    province = province_from_coords(lat, lon)
+
+    # 1. Query by province when we know it — otherwise, get everything.
+    if province:
+        response = supabase.table("crop_reference").select("*").eq("province", province).execute()
+    else:
+        response = supabase.table("crop_reference").select("*").execute()
+    candidates = response.data or []
+
+    # 2. Pull weather for the location — if it fails, return the province
+    #    list unfiltered rather than nothing.
+    try:
+        weather = await fetch_weather(lat, lon)
+        current_temp = weather["weather"]["temperature"]
+    except Exception as error:
+        print(f"[/api/crops] weather lookup failed, returning province crops: {error}", flush=True)
+        return {"status": "success", "province": province, "crops": candidates, "filtered": False}
+
+    # 3. Determine current Southern Hemisphere season from the month.
+    month = date.today().month
+    if month in (12, 1, 2):
+        current_season = 'Summer'
+    elif month in (3, 4, 5):
+        current_season = 'Autumn'
+    elif month in (6, 7, 8):
+        current_season = 'Winter'
+    else:
+        current_season = 'Spring'
+
+    def crop_matches(crop: dict) -> bool:
+        try:
+            temp_ok = crop["min_temp"] <= current_temp <= crop["max_temp"]
+        except (KeyError, TypeError):
+            temp_ok = False
+
+        season = (crop.get("growing_season") or '').strip()
+        if current_season == 'Spring':
+            season_ok = season in ('All Season', 'Summer')
+        elif current_season == 'Autumn':
+            season_ok = season in ('All Season', 'Winter')
+        else:
+            season_ok = season in ('All Season', current_season)
+
+        return temp_ok and season_ok
+
+    # 4. Filter and dedupe by name (DB has historical duplicates).
+    seen_names = set()
+    matching = []
+    for crop in candidates:
+        if not crop_matches(crop):
+            continue
+        name = crop.get("name")
+        if name in seen_names:
+            continue
+        seen_names.add(name)
+        matching.append(crop)
+
+    # 5. If filtering produced nothing, return the unfiltered province list.
+    if not matching:
+        return {"status": "success", "province": province, "crops": candidates, "filtered": False}
+
+    return {"status": "success", "province": province, "crops": matching, "filtered": True}
 
 
 @app.get("/api/market-snapshot")
-def get_market_snapshot():
-    """Fetch market reference price benchmarks"""
+async def get_market_snapshot(lat: float, lon: float):
+    """Return market price benchmarks for the province of (lat, lon).
+
+    Mapping from province to market_location (approximate — each province
+    is served by one main fresh-produce market in our dataset):
+      Western Cape   -> Cape Town Market
+      KwaZulu-Natal  -> Durban Market
+      Free State     -> Bloemfontein Market
+      Limpopo        -> Polokwane Market
+      Mpumalanga     -> Mbombela Market
+      Northern Cape  -> Kimberley Market
+      North West     -> Mahikeng Market
+      Eastern Cape   -> Mthatha Market
+      Gauteng        -> Johannesburg Market (Tshwane is also Gauteng)
+
+    If the province can't be determined, returns all markets. If the
+    province has no rows in the dataset, also returns all markets
+    rather than an empty list.
+    """
     supabase = get_supabase()
+
+    province = province_from_coords(lat, lon)
+
+    # Map province → closest market in our dataset.
+    province_market = {
+        'Western Cape':   'Cape Town Market',
+        'KwaZulu-Natal':  'Durban Market',
+        'Free State':     'Bloemfontein Market',
+        'Limpopo':        'Polokwane Market',
+        'Mpumalanga':     'Mbombela Market',
+        'Northern Cape':  'Kimberley Market',
+        'North West':     'Mahikeng Market',
+        'Eastern Cape':   'Mthatha Market',
+        'Gauteng':        'Johannesburg Market',
+    }
+
+    target_market = province_market.get(province) if province else None
+
+    if target_market:
+        response = supabase.table("market_reference").select("*").eq("market_location", target_market).execute()
+        rows = response.data or []
+        if rows:
+            return {"status": "success", "province": province, "market_location": target_market, "market": rows}
+
+    # Fallback — return every market so the user still sees data.
     response = supabase.table("market_reference").select("*").execute()
-    return {"status": "success", "market": response.data}
+    return {
+        "status": "success",
+        "province": province,
+        "market_location": "National snapshot",
+        "market": response.data or [],
+    }
 
 
 @app.get('/api/plants')
