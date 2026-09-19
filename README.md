@@ -214,11 +214,182 @@ VITE_API_BASE_URL=http://localhost:8000
 | Service | Hosts | URL |
 |---|---|---|
 | Backend | Render (free tier) | `<fill in after deploy>` |
-| Frontend | Vercel (free tier) | `<fill in after deploy>` |
+| Frontend | Netlify (free tier) | `<fill in after deploy>` |
 
 Deployment is Track C's responsibility. The backend must be live before the frontend is, so `VITE_API_BASE_URL` has something to point at.
 
 ---
+
+
+## Roadmap
+
+Nuru Field shipped as a hackathon build. This is what comes next — organized
+into horizons so the near-term work is realistic and the far-term vision is
+clear.
+
+### Horizon 1 — Now (shipped at Creative Chaos 2026)
+
+- ✅ Full-stack React + FastAPI app, deployed live
+- ✅ Supabase auth + Row Level Security on every user table
+- ✅ Location-aware weather via WeatherAPI (live + 10-year history)
+- ✅ Province-aware crop recommendations (42 crops × 9 provinces)
+- ✅ Market snapshot per province (10 SA markets)
+- ✅ AI field-photo analysis (soil, leaves, fruit, pest) via Gemini
+- ✅ Plain-language adviser chat with field context
+- ✅ My Plants tracker + watering reminders
+- ✅ Autocomplete location search on the map
+
+### Horizon 2 — Next 3 months (Data reliability + business foundations)
+
+**Replace illustrative data with real sources.**
+
+The current crop, market, and rainfall datasets were manually seeded to
+demonstrate the feature. Before scale, they need to be sourced from
+authoritative South African and international feeds.
+
+- **Live market prices.** Wire the backend to daily price sheets from the
+  Johannesburg Fresh Produce Market and Tshwane Market — the two biggest
+  fresh-produce markets in South Africa. Also integrate SAFEX futures for
+  grain commodities (maize, wheat, sorghum, sunflowers). Every price will
+  carry a source and timestamp so the farmer knows how current it is.
+- **Real crop suitability data.** Replace the manually curated
+  `crop_reference` table with regional planting guides from DALRRD
+  (Department of Agriculture, Land Reform and Rural Development) and
+  provincial agricultural extension offices.
+- **Ground-truthed weather history.** Supplement WeatherAPI's modelled
+  history with the South African Weather Service (SAWS) archive for
+  verified long-term rainfall and temperature records.
+- **Soil data integration.** Connect to the Agricultural Research Council's
+  soil information system and ISRIC's global soil grid so recommendations
+  can factor in actual regional soil type rather than a pH placeholder.
+
+**Business foundations.**
+
+- Formal entity registration and B-BBEE compliance readiness.
+- Apply to the Technology Innovation Agency (TIA) and DALRRD innovation
+  funds — early-stage grant funding is the primary revenue for years 1-2.
+- Customer discovery with 3-5 agricultural cooperatives to validate the
+  B2B pricing model.
+- Draft data-privacy and POPIA compliance documentation. Farmers must
+  know exactly what is shared, and everything defaulting to private.
+
+### Horizon 3 — Next 6-12 months (Marketplace + community)
+
+**The selling layer — connecting farmers to buyers.**
+
+Once farmers are growing the right crops, the next problem is selling them.
+Nuru Field becomes the bridge between smallholders and buyers.
+
+- **Produce listings.** A farmer can list what they are growing, in what
+  quantity, and when it will be ready. Buyers (restaurants, spaza shops,
+  schools, local cooperatives) can browse by region and crop.
+- **Buyer matching.** When a farmer posts a listing, Nuru surfaces
+  matching buyers within a radius — restaurants looking for spinach,
+  catering companies looking for maize, feeding schemes looking for
+  vegetables. Matching is geographic and seasonal.
+- **Logistics coordination.** For small volumes, offer a shared pickup
+  option where multiple farmers near each other pool deliveries to one
+  buyer. Reduces per-kg cost of getting produce to market.
+- **Payment facilitation.** Partner with a mobile money provider (M-Pesa
+  or similar) so payment happens through the app. Nuru takes a small
+  transaction fee on completed sales — a sustainable revenue line that
+  scales directly with farmer success.
+
+**The knowledge layer — a community that helps each other.**
+
+Human experience matters as much as AI recommendations. Nuru Field
+becomes a place where farmers learn from each other.
+
+- **Farmer-to-farmer Q&A.** Modeled on Stack Overflow — farmers post
+  questions, other farmers and verified agricultural extension officers
+  answer, and the best answers get upvoted. Reputation accrues to
+  consistent contributors.
+- **Verified expert badge.** Extension officers, agronomists, and master
+  farmers carry a verification badge so users can tell whom to trust.
+- **Regional groups.** Threaded discussions by province and crop type —
+  a Limpopo maize group, a Western Cape grape group — so advice stays
+  contextually relevant.
+- **Photo-based troubleshooting.** The existing AI field-photo analysis
+  becomes one input into a community thread. Farmers see what the AI
+  observed, then what other humans with the same issue did.
+- **Seasonal digests.** Weekly summaries per region: what farmers are
+  planting, what is working, what pests are appearing.
+
+**Offline-first.**
+
+Rural internet is patchy. This becomes a PWA with offline caching for
+field records, a "sync when connected" queue, and low-data mode for
+photo uploads.
+
+### Horizon 4 — Year 2+ (Scale + monetisation)
+
+**Revenue streams — in order of expected scale-up.**
+
+1. **Marketplace transaction fees.** Small commission on every sale
+   brokered through the produce listings feature. Scales directly with
+   farmer income.
+2. **Data partnerships.** Aggregated, anonymised, opt-in regional
+   insights sold to agri-input suppliers and financial services. Never
+   individual farmer data — only aggregated intent at the province
+   or district level, and always with clear user consent.
+3. **B2B subscriptions.** Cooperatives, NGOs, and government extension
+   services pay per seat for multi-farmer dashboards, data export, and
+   administrative tools.
+4. **Input referrals.** Certified seed, fertiliser, and tool suppliers
+   pay a referral fee when farmers buy through Nuru. Only recommend
+   inputs the crop actually needs — no upselling.
+
+**Geographic expansion.**
+
+Start with South Africa's smallholder regions. Then move into
+neighbouring markets with similar cropping systems: Lesotho,
+Eswatini, Zimbabwe, Zambia, and Mozambique. Each market needs its
+own crop dataset, market prices, and language localizations.
+
+**Multi-language.**
+
+isiZulu, Sesotho, Setswana, Xitsonga, and Afrikaans — starting with
+the most widely spoken languages in the highest-density smallholder
+regions. Voice-first interaction for farmers who prefer speaking over
+typing.
+
+**Impact measurement.**
+
+Work with an academic partner to measure real outcomes: yield
+improvement, income increase, and crop-loss reduction in pilot
+communities. Public impact reports build the case for continued
+grant funding and open doors to larger institutional partners.
+
+---
+
+## Sources we plan to use
+
+| Data | Current source | Target source |
+|---|---|---|
+| Weather (live) | WeatherAPI | WeatherAPI + SAWS verified feed |
+| Weather (history) | WeatherAPI 10-year sample | SAWS archive + WeatherAPI |
+| Crop recommendations | Curated `crop_reference` table | DALRRD + provincial extension guides |
+| Market prices | Illustrative seed data | JHB Market + Tshwane Market daily sheets + SAFEX |
+| Soil type | None yet | ARC soil info system + ISRIC global soil grid |
+| Pest/disease signal | Gemini vision on user photos | Gemini + community-reported + extension-officer verified |
+
+All future data integrations will be documented with source, update
+frequency, and last-refresh timestamp visible to the user.
+
+---
+
+## What we are deliberately not doing
+
+- **Not charging farmers a subscription.** Smallholder farmers cannot
+  afford one, and the mission depends on access being free.
+- **Not selling individual farmer data.** Only aggregated insights,
+  only with consent, only at province or district level.
+- **Not replacing extension officers.** Nuru is an information tool that
+  points farmers to professional help when the situation warrants it.
+- **Not making crop, chemical, or disease recommendations outside what
+  we can verify.** If a photo is unclear, we say so. If a symptom is
+  serious, we recommend a local expert.
+
 
 ## Who to ask for what
 
